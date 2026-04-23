@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll System - Catch Security Links</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Include SheetJS for Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Include html2pdf for PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+        // Authentication Guard
+        if (sessionStorage.getItem('admin_auth') !== 'true') {
+            window.location.href = 'login.html';
+        }
+    </script>
+</head>
+
+<body>
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="brand"
+            style="display: block; text-align: center; padding: 0 1.5rem; margin-top: 1rem; margin-bottom: 2rem;">
+            <img src="img/logo.jpg" alt="Catch Security Links Ltd"
+                style="width: 100%; max-width: 180px; height: auto; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+        </div>
+        <ul>
+            <li class="active" onclick="switchTab('dashboard', this); loadDashboard();"><i
+                    class="fa-solid fa-chart-pie"></i> &nbsp; Dashboard</li>
+            <li onclick="switchTab('employees', this)"><i class="fa-solid fa-users"></i> &nbsp; Staff & Guards</li>
+            <li onclick="switchTab('clients', this)"><i class="fa-solid fa-handshake"></i> &nbsp; Companies / Clients</li>
+
+            <li onclick="switchTab('payroll', this)"><i class="fa-solid fa-file-invoice-dollar"></i> &nbsp; Process
+                Payroll</li>
+            <li onclick="switchTab('reports', this)"><i class="fa-solid fa-file-excel"></i> &nbsp; Reports & Exports
+            </li>
+            <li onclick="switchTab('company', this)"><i class="fa-solid fa-building"></i> &nbsp; Company Taxes</li>
+        </ul>
+        <div style="padding: 1rem 2rem; border-top: 1px solid rgba(255,255,255,0.1);">
+            <button class="btn" style="width:100%; background:rgba(255,0,0,0.2); color:white; border: 1px solid red;"
+                onclick="logoutAdmin()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Logout</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- Company Header Letterhead -->
+        <div class="company-header glass-card" style="text-align: center; margin-bottom: 2rem; padding: 2rem;">
+
+            <h1 style="color: var(--csl-green); font-size: 26px; margin-bottom: 0.5rem; letter-spacing: 1px;">CATCH
+                SECURITY LINKS LTD.</h1>
+            <p style="font-size: 14px; font-weight: 600; color: #444;">P.O. BOX 3360 – 80100 – GPO MOMBASA</p>
+            <p style="font-size: 14px; color: #555; margin-bottom: 0.5rem;">
+                <i class="fa-solid fa-phone" style="color:var(--csl-green)"></i> TEL: (+254) 0538013251 / 0722 235 217 /
+                0722 279 890 &nbsp; | &nbsp;
+                <i class="fa-solid fa-envelope" style="color:var(--csl-green)"></i> E-mail:
+                admin@catchsecuritylinksltd.co.ke
+            </p>
+            <p
+                style="font-size: 13px; color: #666; border-top: 1px solid #ddd; padding-top: 0.8rem; margin-top: 0.8rem; font-weight: 500;">
+                Security Guards, Patrols, Alarmed Response, Private Investigations, Cash-In-Transit, Escorts, Electric
+                Fencing & General Security Procuring
+            </p>
+        </div>
+
+        <header class="top-nav"
+            style="background: white; padding: 1rem 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 2rem;">
+            <h2 id="page-title" style="color: var(--csl-dark); margin:0;">Dashboard</h2>
+            <div class="user-profile" style="display: flex; align-items: center; gap: 15px;">
+                <div id="live-clock" style="margin-right: 1.5rem; text-align: right; color: var(--csl-green); font-weight: 600; font-size: 14px; border-right: 2px solid #eee; padding-right: 1.5rem;">
+                    <!-- Time goes here -->
+                </div>
+                <span style="font-weight: 500;">System Administrator</span>
+                <i class="fa-solid fa-circle-user fa-2x text-green"></i>
+            </div>
+        </header>
+
+        <!-- DASHBOARD VIEW -->
+        <div id="view-dashboard" class="view-section">
+            <div class="dashboard-grid">
+                <div class="glass-card stat-card">
+                    <h3>Total Active Staff</h3>
+                    <div class="value" id="dash-staff">...</div>
+                </div>
+                <div class="glass-card stat-card yellow-accent">
+                    <h3>Total Gross Payroll</h3>
+                    <div class="value" id="dash-gross">...</div>
+                </div>
+                <div class="glass-card stat-card">
+                    <h3>Tax Remittance (PAYE)</h3>
+                    <div class="value" id="dash-paye">...</div>
+                </div>
+                <div class="glass-card stat-card yellow-accent">
+                    <h3>Total Deductions (NSSF+SHA)</h3>
+                    <div class="value" id="dash-deductions">...</div>
+                </div>
+            </div>
+
+            <div class="glass-card mb-2">
+                <h2 class="mb-1 text-green">Section Breakdown</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Section</th>
+                                <th>Headcount</th>
+                                <th>Total Gross</th>
+                                <th>Net Payable</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dash-section-list">
+                            <tr>
+                                <td colspan="4" style="text-align: center;">Loading breakdown...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- EMPLOYEES VIEW -->
+        <div id="view-employees" class="view-section" style="display: none;">
+            <div class="glass-card mb-2">
+                <div class="flex justify-between align-center mb-1">
+                    <h2 class="text-green">Employee Management</h2>
+                    <button class="btn btn-primary" onclick="openAddEmployeeModal()"><i class="fa-solid fa-plus"></i>
+                        Add Employee</button>
+                </div>
+                <!-- Region Filtering Buttons -->
+                <div
+                    style="margin-bottom: 1.5rem; display: flex; gap: 10px; border-bottom: 1px solid var(--csl-gray); padding-bottom: 1rem;">
+                    <button class="btn btn-accent" onclick="loadEmployees(null)"><i class="fa-solid fa-globe"></i> All
+                        Staff & Guards</button>
+                    <button class="btn btn-primary" style="background:#006039;" onclick="loadEmployees(1)"><i
+                            class="fa-solid fa-map-pin"></i> Mombasa Branch</button>
+                    <button class="btn btn-primary" style="background:#006039;" onclick="loadEmployees(2)"><i
+                            class="fa-solid fa-map-pin"></i> Nairobi Branch</button>
+                </div>
+                <div class="table-container">
+                    <table id="employees-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Role</th>
+                                <th>Assigned Client</th>
+                                <th>Branch</th>
+                                <th>Region</th>
+                                <th>Salary</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="employees-list">
+                            <!-- Populated via JS -->
+                            <tr>
+                                <td colspan="8" style="text-align:center;">Loading employees...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- CLIENTS VIEW -->
+        <div id="view-clients" class="view-section" style="display: none;">
+            <div class="glass-card mb-2">
+                <div class="flex justify-between align-center mb-1">
+                    <h2 class="text-green">Contracted Companies & Clients</h2>
+                    <button class="btn btn-primary" onclick="openAddClientModal()"><i class="fa-solid fa-building"></i> Add Client</button>
+                </div>
+                <div class="table-container">
+                    <table id="clients-table">
+                        <thead>
+                            <tr>
+                                <th>Company Name</th>
+                                <th>Branch</th>
+                                <th>Region</th>
+                                <th>Contact Person</th>
+                                <th>Phone</th>
+                                <th>Assigned Guards</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-list">
+                            <tr>
+                                <td colspan="7" style="text-align:center;">Loading clients...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYROLL PROCESSING VIEW -->
+        <div id="view-payroll" class="view-section" style="display: none;">
+            <div class="glass-card mb-2">
+                <div class="flex justify-between align-center mb-1">
+                    <h2 class="text-green">Process Monthly Payroll</h2>
+                </div>
+                <div class="form-group" style="max-width: 300px; margin-bottom: 2rem;">
+                    <label>Select Payroll Month</label>
+                    <input type="month" id="payroll-month" class="form-control" value="2024-05">
+                </div>
+                <button class="btn btn-primary" onclick="runPayroll()"><i class="fa-solid fa-gears"></i> Run Payroll
+                    Execution</button>
+                <div id="payroll-status" style="margin-top: 1rem; color: var(--csl-green); font-weight: 500;"></div>
+            </div>
+        </div>
+
+        <!-- COMPANY TAXES VIEW -->
+        <div id="view-company" class="view-section" style="display: none;">
+            <div class="glass-card mb-2">
+                <h2 class="mb-1 text-green">Employer Obligations & Taxes</h2>
+                <div class="form-group" style="max-width: 300px; margin-bottom: 2rem;">
+                    <label>Select Month</label>
+                    <input type="month" id="company-tax-month" class="form-control" value="2024-05"
+                        onchange="loadCompanyTaxes()">
+                </div>
+                <div class="dashboard-grid">
+                    <div class="glass-card stat-card yellow-accent">
+                        <h3>Employer NSSF (Tier 1+2)</h3>
+                        <div class="value" id="comp-nssf">Ksh 0.00</div>
+                    </div>
+                    <div class="glass-card stat-card yellow-accent">
+                        <h3>Employer Housing Levy (1.5%)</h3>
+                        <div class="value" id="comp-levy">Ksh 0.00</div>
+                    </div>
+                    <div class="glass-card stat-card">
+                        <h3>NITA (Ksh 50/Emp)</h3>
+                        <div class="value" id="comp-nita">Ksh 0.00</div>
+                    </div>
+                    <div class="glass-card stat-card">
+                        <h3>Total PAYE to Remit</h3>
+                        <div class="value" id="comp-paye">Ksh 0.00</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- REPORTS VIEW -->
+        <div id="view-reports" class="view-section" style="display: none;">
+            <div class="glass-card mb-2">
+                <div class="flex justify-between align-center mb-1">
+                    <h2 class="text-green">Monthly Payroll Report</h2>
+                    <div class="gap-1 flex">
+                        <button class="btn btn-primary" onclick="exportToPDF()"><i class="fa-solid fa-file-pdf"></i>
+                            Export PDF</button>
+                        <button class="btn btn-accent" onclick="exportToExcel()"><i class="fa-solid fa-file-excel"></i>
+                            Export Excel</button>
+                    </div>
+                </div>
+
+                <div id="report-content" class="table-container" style="background: white; padding: 0.5rem;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 0.5rem; border-bottom: 2px solid var(--csl-dark); padding-bottom: 0.5rem;">
+                        <img src="img/logo.jpg" alt="Logo" style="height: 80px; border-radius: 8px;">
+                        <div style="text-align: center;">
+                            <h2 style="color: var(--csl-green); margin: 0; font-size: 20px; font-weight: bold;">CATCH SECURITY LINKS LIMITED</h2>
+                            <p style="margin: 0.2rem 0; font-size: 11px; font-weight: 600; color: #222;">P.O. BOX 3360 – 80100 – GPO MOMBASA</p>
+                            <p style="margin: 0.2rem 0; font-size: 11px; font-weight: 600; color: #222;">TEL: (+254) 0538013251 / 0722 235 217 / 0722 279 890, E-mail-admin@catchsecuritylinksltd.co.ke</p>
+                            <p style="margin: 0.4rem 0 0 0; font-size: 10px; font-style: italic; color: var(--csl-dark);">Security Guards, Patrols, Alarmed Response, Private Investigations, Cash-In-Transit,<br>Escorts, Electric Fencing @ General Security Procuring</p>
+                        </div>
+                    </div>
+                    <table id="payroll-report-table" style="font-size: 11px; white-space: nowrap;">
+                        <thead>
+                            <tr>
+                                <th>Emp Name</th>
+                                <th>Bank Name</th>
+                                <th>Account No.</th>
+                                <th>Gross Pay</th>
+                                <th>NSSF</th>
+                                <th>SHA (2.75%)</th>
+                                <th>Housing Levy</th>
+                                <th>PAYE</th>
+                                <th>Net Pay</th>
+                            </tr>
+                        </thead>
+                        <tbody id="payroll-report-list">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Footer -->
+        <footer
+            style="text-align: center; margin-top: 3rem; padding: 2rem; border-top: 2px solid var(--csl-green); background: white; border-radius: 12px 12px 0 0; box-shadow: 0 -4px 15px rgba(0,0,0,0.03);">
+            <h3 style="color: var(--csl-green); margin-bottom: 0.8rem; font-style: italic; font-weight: 600;">Simply
+                professional Always catch Security links Ltd.</h3>
+            <p style="font-size: 13px; color: #777; font-weight: 500;">
+                Created and Distributed by E. Nyakundi. N for DataPort. Inc ,
+                <a href="https://www.dpinc.top" target="_blank"
+                    style="color: var(--csl-green); text-decoration: none; font-weight: bold;">www.dpinc.top</a>
+            </p>
+        </footer>
+
+    </main>
+
+    <!-- ADD/EDIT EMPLOYEE MODAL -->
+    <div id="addEmployeeModal" class="modal">
+        <div class="modal-content glass-card">
+            <div class="flex justify-between align-center mb-1">
+                <h2 class="text-green" id="modal-title">Register New Employee</h2>
+                <span class="close-modal" onclick="closeAddEmployeeModal()">&times;</span>
+            </div>
+            <form id="addEmployeeForm" onsubmit="submitEmployeeForm(event)">
+                <input type="hidden" id="emp-edit-id" value="">
+                <div class="dashboard-grid">
+                    <div class="form-group">
+                        <label>First Name</label>
+                        <input type="text" id="emp-fname" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name</label>
+                        <input type="text" id="emp-lname" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>ID Number</label>
+                        <input type="text" id="emp-id" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone Number</label>
+                        <input type="text" id="emp-phone" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Home Location</label>
+                        <input type="text" id="emp-location" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>KRA PIN</label>
+                        <input type="text" id="emp-kra" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>NSSF Number</label>
+                        <input type="text" id="emp-nssf" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>SHA Number</label>
+                        <input type="text" id="emp-sha" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <select id="emp-role" class="form-control" required>
+                            <option value="Guard">Guard</option>
+                            <option value="Staff">Staff</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Branch</label>
+                        <select id="emp-section" class="form-control" required onchange="updateRegionsDropdown()">
+                            <option value="">Select Branch</option>
+                            <option value="1">Mombasa Branch</option>
+                            <option value="2">Nairobi Branch</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Assigned Region</label>
+                        <select id="emp-region" class="form-control" required onchange="filterClientsLocally()">
+                            <option value="">Select Branch First</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Assigned Client / Company</label>
+                        <select id="emp-client" class="form-control">
+                            <option value="">Unassigned / Floating Guard</option>
+                            <!-- Dynamically loaded -->
+                        </select>
+                    </div>
+                </div>
+
+                <!-- PAYMENT DETAILS SECTION -->
+                <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--csl-dark); border-bottom: 2px solid #eee; padding-bottom: 0.3rem;">Payment Details (Direct Deposit)</h4>
+                <div class="dashboard-grid">
+                    <div class="form-group">
+                        <label>Bank Name</label>
+                        <input type="text" id="emp-bank" class="form-control" placeholder="e.g. Equity Bank, KCB, Absa">
+                    </div>
+                    <div class="form-group">
+                        <label>Account Number</label>
+                        <input type="text" id="emp-account" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Basic Salary (Ksh)</label>
+                        <input type="number" id="emp-salary" class="form-control" required>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1.5rem; text-align: right;">
+                    <button type="button" class="btn" style="background:#e2e8f0; margin-right: 1rem;"
+                        onclick="closeAddEmployeeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="submit-emp-btn">Save Employee</button>
+                </div>
+                <div id="emp-submit-status" style="margin-top: 1rem; text-align:right;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ADD/EDIT CLIENT MODAL -->
+    <div id="addClientModal" class="modal">
+        <div class="modal-content glass-card" style="max-width: 600px;">
+            <div class="flex justify-between align-center mb-1">
+                <h2 class="text-green" id="client-modal-title">Register New Client</h2>
+                <span class="close-modal" onclick="closeAddClientModal()">&times;</span>
+            </div>
+            <form id="addClientForm" onsubmit="submitClientForm(event)">
+                <input type="hidden" id="client-edit-id" value="">
+                <div class="form-group">
+                    <label>Company / Client Name</label>
+                    <input type="text" id="client-name" class="form-control" required>
+                </div>
+                <div class="dashboard-grid">
+                    <div class="form-group">
+                        <label>Contact Person</label>
+                        <input type="text" id="client-contact" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone Number</label>
+                        <input type="text" id="client-phone" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Branch Assignment</label>
+                        <select id="client-section" class="form-control" required onchange="updateClientRegionsDropdown()">
+                            <option value="">Select Branch</option>
+                            <option value="1">Mombasa Branch</option>
+                            <option value="2">Nairobi Branch</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Region Details</label>
+                        <select id="client-region" class="form-control" required>
+                            <option value="">Select Branch First</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top: 1.5rem; text-align: right;">
+                    <button type="button" class="btn" style="background:#e2e8f0; margin-right: 1rem;" onclick="closeAddClientModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="submit-client-btn">Save Client</button>
+                </div>
+                <div id="client-submit-status" style="margin-top: 1rem; text-align:right;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ADMIN AUTHORIZATION MODAL -->
+    <div id="adminAuthModal" class="modal">
+        <div class="modal-content glass-card" style="max-width: 400px; text-align: center;">
+            <div class="flex justify-between align-center mb-1">
+                <h3 class="text-green"><i class="fa-solid fa-triangle-exclamation" style="color: #dc3545;"></i> Admin Verification</h3>
+                <span class="close-modal" onclick="closeAdminAuthModal()">&times;</span>
+            </div>
+            <p style="margin-bottom: 1.5rem; color: #555; text-align:left;">This is a destructive action. Please enter your administrator password to authorize deletion.</p>
+            <input type="password" id="admin-auth-password" class="form-control" placeholder="Master Password" style="margin-bottom: 1.5rem; text-align: center;">
+            
+            <input type="hidden" id="pending-delete-type">
+            <input type="hidden" id="pending-delete-id">
+            
+            <div style="display: flex; justify-content: center; gap: 1rem;">
+                <button class="btn" style="background:#e2e8f0; color: #333;" onclick="closeAdminAuthModal()">Cancel</button>
+                <button class="btn" id="admin-auth-btn" style="background:#dc3545; color: white;" onclick="submitAdminAuth()">Verify & Delete</button>
+            </div>
+            <div id="admin-auth-error" style="color: #dc3545; margin-top: 1rem; display: none;"></div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Catch Security Links</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .login-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            width: 100%;
+            background-color: var(--csl-light);
+            position: relative;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 550px;
+            padding: 4rem 3rem;
+            text-align: center;
+            border-radius: 12px;
+        }
+        .login-card img.logo {
+            width: 250px;
+            height: auto;
+            margin-bottom: 2rem;
+        }
+        .login-card h2 {
+            color: var(--csl-green);
+            margin-bottom: 2.5rem;
+            font-size: 1.8rem;
+        }
+        .login-card form {
+            text-align: left;
+        }
+        .login-card .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .login-card label {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+        .login-card input {
+            padding: 1rem;
+            font-size: 1.1rem;
+        }
+        .login-card button {
+            padding: 1rem;
+            font-size: 1.2rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-wrapper">
+        <div class="glass-card login-card">
+            <img src="img/logo.jpg" alt="Catch Security Logo" class="logo">
+            <h2>Admin Security Portal</h2>
+            
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" class="form-control" placeholder="Enter admin" required>
+                </div>
+                <div class="form-group mb-2">
+                    <label>Password</label>
+                    <input type="password" id="password" class="form-control" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;" id="login-btn">Secure Login</button>
+                <div id="login-error" style="color: red; margin-top: 1rem; text-align: center; display: none;"></div>
+            </form>
+        </div>
+
+        <!-- Sticky Bottom Footer -->
+        <footer style="position: absolute; bottom: 0; left: 0; width: 100%; text-align: center; padding: 1.5rem; border-top: 2px solid var(--csl-green); background: white; box-shadow: 0 -4px 15px rgba(0,0,0,0.03);">
+            <h4 style="color: var(--csl-green); margin-bottom: 0.5rem; font-style: italic; font-weight: 600; font-size: 15px;">"Simply professional Always catch Security links Ltd."</h4>
+            <p style="font-size: 13px; color: #777; font-weight: 500;">
+                Created and Distributed by E. Nyakundi. N for DataPort. Inc , 
+                <a href="https://www.dpinc.top" target="_blank" style="color: var(--csl-green); text-decoration: none; font-weight: bold;">www.dpinc.top</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const btn = document.getElementById('login-btn');
+            const err = document.getElementById('login-error');
+
+            btn.innerText = "Authenticating...";
+            err.style.display = 'none';
+
+            try {
+                const response = await fetch('backend/api.php?action=login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    sessionStorage.setItem('admin_auth', 'true');
+                    window.location.href = 'index.html';
+                } else {
+                    err.innerText = result.message;
+                    err.style.display = 'block';
+                }
+            } catch (error) {
+                err.innerText = "Server error. Is XAMPP running?";
+                err.style.display = 'block';
+            } finally {
+                btn.innerText = "Secure Login";
+            }
+        }
+    </script>
+</body>
+</html>
