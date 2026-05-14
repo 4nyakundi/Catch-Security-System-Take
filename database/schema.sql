@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS payroll_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     employee_id INT NOT NULL,
     payroll_month VARCHAR(20) NOT NULL, -- e.g., '2024-05'
+    days_worked INT DEFAULT 30,
+    basic_salary DECIMAL(10, 2) NOT NULL,
     gross_pay DECIMAL(10, 2) NOT NULL,
     nssf_deduction DECIMAL(10, 2) NOT NULL,
     sha_deduction DECIMAL(10, 2) NOT NULL,

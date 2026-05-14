@@ -16,11 +16,20 @@ switch ($action) {
     case 'get_employees':
         getEmployees($conn);
         break;
-    case 'run_payroll':
-        runPayroll($conn);
+    case 'generate_payroll_preview':
+        generatePayrollPreview($conn);
+        break;
+    case 'save_payroll':
+        savePayroll($conn);
         break;
     case 'get_payroll_report':
         getPayrollReport($conn);
+        break;
+    case 'get_payroll_months':
+        getPayrollMonths($conn);
+        break;
+    case 'get_payroll_clients':
+        getPayrollClients($conn);
         break;
     case 'get_company_taxes':
         getCompanyTaxes($conn);
@@ -56,105 +65,120 @@ switch ($action) {
         echo json_encode(["status" => "error", "message" => "Invalid action."]);
 }
 
-function runPayroll($conn) {
-    $month = isset($_GET['month']) ? $_GET['month'] : '';
-    if(!$month) {
-        echo json_encode(["status" => "error", "message" => "No month specified."]);
-        return;
-    }
-
-    // Clear existing records for the month to avoid duplicates
-    $stmt = $conn->prepare("DELETE FROM payroll_records WHERE payroll_month = ?");
-    if($stmt) {
-        $stmt->bind_param("s", $month);
-        $stmt->execute();
-    }
-
-    $stmt2 = $conn->prepare("DELETE FROM company_finances WHERE finance_month = ?");
-    if($stmt2) {
-        $stmt2->bind_param("s", $month);
-        $stmt2->execute();
-    }
-
-    $result = $conn->query("SELECT * FROM employees WHERE status = 'Active'");
+function generatePayrollPreview($conn) {
+    $result = $conn->query("SELECT id, first_name, last_name, id_number, phone_number, account_number, sha_number, nssf_number, kra_pin, role, basic_salary FROM employees WHERE status = 'Active'");
     if (!$result || $result->num_rows == 0) {
         echo json_encode(["status" => "error", "message" => "No active employees found."]);
         return;
     }
 
-    $total_employer_nssf = 0;
-    $total_employer_levy = 0;
-    $total_nita = 0;
-    $total_paye = 0;
-    $count = 0;
-
-    $stmt_insert = $conn->prepare("INSERT INTO payroll_records (employee_id, payroll_month, gross_pay, nssf_deduction, sha_deduction, housing_levy, paye_tax, net_pay) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-
+    $employees = [];
     while($emp = $result->fetch_assoc()) {
-        $gross = floatval($emp['basic_salary']);
-        
-        // 1. NSSF: 6% capped at Ksh 2,160 (for 2024 tier 2 upper limit)
-        $nssf = round(min($gross * 0.06, 2160), 2);
-        
-        // 2. SHA: 2.75% of gross
-        $sha = round($gross * 0.0275, 2);
-        
-        // 3. Housing Levy: 1.5% of gross
-        $levy = round($gross * 0.015, 2);
+        $employees[] = $emp;
+    }
+    echo json_encode(["status" => "success", "data" => $employees]);
+}
 
-        // 4. PAYE (Simplified 2024 logic)
-        $taxable = $gross - $nssf - $levy; // NSSF and Levy are allowable deductions
-        $paye = 0;
-        if($taxable > 24000) {
-            $tax = 24000 * 0.10;
-            if($taxable > 32333) {
-                $tax += (32333 - 24000) * 0.25;
-                if($taxable > 500000) {
-                    $tax += (500000 - 32333) * 0.30;
-                    $tax += ($taxable - 500000) * 0.35;
-                } else {
-                    $tax += ($taxable - 32333) * 0.30;
-                }
-            } else {
-                $tax += ($taxable - 24000) * 0.25;
-            }
-            $paye = max(0, $tax - 2400); // subtract personal relief
+function savePayroll($conn) {
+    try {
+        $json = file_get_contents('php://input');
+        $data = json_decode($json, true);
+
+        if(!$data || !isset($data['month']) || !isset($data['records'])) {
+            echo json_encode(["status" => "error", "message" => "Invalid payload."]);
+            return;
         }
-        $paye = round($paye, 2);
-        
-        $net = $gross - $nssf - $sha - $levy - $paye;
 
-        if($stmt_insert) {
-            $stmt_insert->bind_param("isdddddd", $emp['id'], $month, $gross, $nssf, $sha, $levy, $paye, $net);
+        $month = $data['month'];
+        $records = $data['records'];
+
+        // Clear existing records for the month to avoid duplicates
+        $stmt = $conn->prepare("DELETE FROM payroll_records WHERE payroll_month = ?");
+        if($stmt) {
+            $stmt->bind_param("s", $month);
+            $stmt->execute();
+        }
+
+        $stmt2 = $conn->prepare("DELETE FROM company_finances WHERE finance_month = ?");
+        if($stmt2) {
+            $stmt2->bind_param("s", $month);
+            $stmt2->execute();
+        }
+
+        $total_employer_nssf = 0;
+        $total_employer_levy = 0;
+        $total_nita = 0;
+        $total_paye = 0;
+        $count = 0;
+
+        $stmt_insert = $conn->prepare("INSERT INTO payroll_records (employee_id, payroll_month, days_worked, basic_salary, gross_pay, nssf_deduction, sha_deduction, housing_levy, paye_tax, net_pay) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        if (!$stmt_insert) {
+            throw new Exception("Failed to prepare INSERT statement. " . $conn->error);
+        }
+
+        foreach($records as $rec) {
+            $emp_id = intval($rec['id']);
+            $days = intval($rec['days']);
+            $basic = floatval($rec['basic_salary']);
+            $gross = floatval($rec['gross']);
+            $nssf = floatval($rec['nssf']);
+            $sha = floatval($rec['sha']);
+            $levy = floatval($rec['levy']);
+            $paye = floatval($rec['paye']);
+            $net = floatval($rec['net']);
+
+            $stmt_insert->bind_param("isiddddddd", $emp_id, $month, $days, $basic, $gross, $nssf, $sha, $levy, $paye, $net);
             $stmt_insert->execute();
+
+            // Company obligations
+            $total_employer_nssf += $nssf; // Matching NSSF
+            $total_employer_levy += $levy; // Matching Levy
+            $total_nita += 50; // Standard Ksh 50
+            $total_paye += $paye;
+            $count++;
         }
 
-        // Company obligations
-        $total_employer_nssf += $nssf; // Matching NSSF
-        $total_employer_levy += $levy; // Matching Levy
-        $total_nita += 50; // Standard Ksh 50
-        $total_paye += $paye;
-        $count++;
-    }
+        // Insert company finances
+        $stmt_comp = $conn->prepare("INSERT INTO company_finances (finance_month, total_employer_nssf, total_employer_housing_levy, total_nita, total_paye_remitted) VALUES (?, ?, ?, ?, ?)");
+        if($stmt_comp) {
+            $stmt_comp->bind_param("sdddd", $month, $total_employer_nssf, $total_employer_levy, $total_nita, $total_paye);
+            $stmt_comp->execute();
+        }
 
-    // Insert company finances
-    $stmt_comp = $conn->prepare("INSERT INTO company_finances (finance_month, total_employer_nssf, total_employer_housing_levy, total_nita, total_paye_remitted) VALUES (?, ?, ?, ?, ?)");
-    if($stmt_comp) {
-        $stmt_comp->bind_param("sdddd", $month, $total_employer_nssf, $total_employer_levy, $total_nita, $total_paye);
-        $stmt_comp->execute();
+        echo json_encode(["status" => "success", "count" => $count]);
+    } catch (Exception $e) {
+        $errorMsg = $e->getMessage();
+        if (strpos($errorMsg, "Unknown column") !== false || strpos($errorMsg, "Failed to prepare") !== false) {
+            echo json_encode(["status" => "error", "message" => "Database columns missing! Please import database/alter_payroll_records.sql in phpMyAdmin."]);
+        } else {
+            echo json_encode(["status" => "error", "message" => "MySQL Error: " . $errorMsg]);
+        }
     }
-
-    echo json_encode(["status" => "success", "count" => $count]);
 }
 
 function getPayrollReport($conn) {
     $month = isset($_GET['month']) ? $_GET['month'] : '';
-    $sql = "SELECT e.first_name, e.last_name, e.bank_name, e.account_number, p.* FROM payroll_records p 
+    $clientId = isset($_GET['client_id']) ? $_GET['client_id'] : 'all';
+
+    $sql = "SELECT e.first_name, e.last_name, e.bank_name, e.account_number, e.id_number, e.phone_number, e.sha_number, e.nssf_number, e.kra_pin, e.role, p.* 
+            FROM payroll_records p 
             JOIN employees e ON p.employee_id = e.id 
             WHERE p.payroll_month = ?";
+            
+    if ($clientId === 'unassigned') {
+        $sql .= " AND e.client_id IS NULL";
+    } else if ($clientId !== 'all') {
+        $sql .= " AND e.client_id = ?";
+    }
+
     $stmt = $conn->prepare($sql);
     if($stmt) {
-        $stmt->bind_param("s", $month);
+        if ($clientId !== 'all' && $clientId !== 'unassigned') {
+            $stmt->bind_param("si", $month, $clientId);
+        } else {
+            $stmt->bind_param("s", $month);
+        }
         $stmt->execute();
         $result = $stmt->get_result();
         $data = [];
@@ -162,6 +186,56 @@ function getPayrollReport($conn) {
             $data[] = $row;
         }
         echo json_encode(["status" => "success", "data" => $data]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Database query failed."]);
+    }
+}
+
+function getPayrollMonths($conn) {
+    $sql = "SELECT DISTINCT payroll_month FROM payroll_records ORDER BY payroll_month DESC";
+    $result = $conn->query($sql);
+    $months = [];
+    if ($result) {
+        while($row = $result->fetch_assoc()) {
+            $months[] = $row['payroll_month'];
+        }
+    }
+    echo json_encode(["status" => "success", "data" => $months]);
+}
+
+function getPayrollClients($conn) {
+    $month = isset($_GET['month']) ? $_GET['month'] : '';
+    
+    // Get clients that have at least one employee in the payroll for this month
+    $sql = "SELECT DISTINCT c.id, c.company_name 
+            FROM payroll_records p 
+            JOIN employees e ON p.employee_id = e.id 
+            JOIN clients c ON e.client_id = c.id 
+            WHERE p.payroll_month = ? ORDER BY c.company_name ASC";
+            
+    $stmt = $conn->prepare($sql);
+    $clients = [];
+    if($stmt) {
+        $stmt->bind_param("s", $month);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while($row = $result->fetch_assoc()) {
+            $clients[] = $row;
+        }
+        
+        // Also check if there are unassigned employees
+        $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p JOIN employees e ON p.employee_id = e.id WHERE p.payroll_month = ? AND e.client_id IS NULL";
+        $stmtU = $conn->prepare($sqlUnassigned);
+        if ($stmtU) {
+            $stmtU->bind_param("s", $month);
+            $stmtU->execute();
+            $resU = $stmtU->get_result()->fetch_assoc();
+            if ($resU && $resU['count'] > 0) {
+                $clients[] = ["id" => "unassigned", "company_name" => "Unassigned / Floating Guards"];
+            }
+        }
+        
+        echo json_encode(["status" => "success", "data" => $clients]);
     } else {
         echo json_encode(["status" => "error", "message" => "Database query failed."]);
     }

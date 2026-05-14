@@ -26,7 +26,7 @@ function switchTab(tabId, el, sectionId = null) {
     } else if (tabId === 'clients') {
         loadClients();
     } else if (tabId === 'reports') {
-        loadPayrollReport();
+        loadPayrollArchives();
     } else if (tabId === 'company') {
         loadCompanyTaxes();
     } else if (tabId === 'dashboard') {
@@ -113,18 +113,34 @@ async function loadEmployees(sectionId = null) {
     }
 }
 
-// Run Payroll Processing
-async function runPayroll() {
+let payrollPreviewData = [];
+
+// Generate Editable Payroll Preview
+async function generatePayrollPreview() {
     const month = document.getElementById('payroll-month').value;
     const statusDiv = document.getElementById('payroll-status');
     if(!month) return;
 
-    statusDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing payroll...';
+    statusDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating preview...';
+    document.getElementById('payroll-preview-section').style.display = 'none';
+
     try {
-        const response = await fetch(`backend/api.php?action=run_payroll&month=${month}`);
+        const response = await fetch(`backend/api.php?action=generate_payroll_preview`);
         const data = await response.json();
+        
         if(data.status === 'success') {
-            statusDiv.innerHTML = `<i class="fa-solid fa-check"></i> Successfully processed payroll for ${data.count} employees.`;
+            payrollPreviewData = data.data.map(emp => {
+                // Initialize default calculations for 30 days
+                emp.basic_salary = parseFloat(emp.basic_salary) || 0;
+                emp.days = 30;
+                emp.gross = emp.basic_salary; // Gross 2 (Actual)
+                
+                return calculatePayrollTaxes(emp);
+            });
+            
+            renderPayrollPreviewTable();
+            document.getElementById('payroll-preview-section').style.display = 'block';
+            statusDiv.innerHTML = '';
         } else {
             statusDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Error: ${data.message}`;
         }
@@ -133,28 +149,253 @@ async function runPayroll() {
     }
 }
 
-// Fetch Payroll Data for Reports
-async function loadPayrollReport() {
-    const list = document.getElementById('payroll-report-list');
-    list.innerHTML = '<tr><td colspan="7" style="text-align:center;">Loading records...</td></tr>';
+function calculatePayrollTaxes(emp) {
+    // 1. Gross 2 based on days
+    emp.gross = (emp.basic_salary / 30) * emp.days;
+    let gross = emp.gross;
+
+    // 2. NSSF: 6% capped at Ksh 2,160 (for 2024 tier 2 upper limit)
+    emp.nssf = Math.min(gross * 0.06, 2160);
     
-    // Dynamically get the month selected in the payroll tab (or current month)
-    const month = document.getElementById('payroll-month').value || '2024-05';
-    const monthDisplay = document.getElementById('current-month-display');
-    if(monthDisplay) monthDisplay.innerText = month;
+    // 3. SHA: 2.75% of gross
+    emp.sha = gross * 0.0275;
+    
+    // 4. Housing Levy: 1.5% of gross
+    emp.levy = gross * 0.015;
+
+    // 5. PAYE (Simplified 2024 logic)
+    let taxable = gross - emp.nssf - emp.levy;
+    let paye = 0;
+    if(taxable > 24000) {
+        let tax = 24000 * 0.10;
+        if(taxable > 32333) {
+            tax += (32333 - 24000) * 0.25;
+            if(taxable > 500000) {
+                tax += (500000 - 32333) * 0.30;
+                tax += (taxable - 500000) * 0.35;
+            } else {
+                tax += (taxable - 32333) * 0.30;
+            }
+        } else {
+            tax += (taxable - 24000) * 0.25;
+        }
+        paye = Math.max(0, tax - 2400); // subtract personal relief
+    }
+    emp.paye = paye;
+    
+    emp.net = gross - emp.nssf - emp.sha - emp.levy - emp.paye;
+
+    return emp;
+}
+
+function renderPayrollPreviewTable() {
+    const list = document.getElementById('payroll-preview-list');
+    list.innerHTML = '';
+    
+    if(payrollPreviewData.length === 0) {
+        list.innerHTML = '<tr><td colspan="16" style="text-align:center;">No active employees found.</td></tr>';
+        return;
+    }
+
+    payrollPreviewData.forEach((emp, index) => {
+        list.innerHTML += `
+            <tr>
+                <td>${emp.first_name} ${emp.last_name}</td>
+                <td>${emp.id_number}</td>
+                <td>${emp.phone_number || 'N/A'}</td>
+                <td>${emp.account_number || 'N/A'}</td>
+                <td>${emp.sha_number || 'N/A'}</td>
+                <td>${emp.nssf_number || 'N/A'}</td>
+                <td>${emp.kra_pin || 'N/A'}</td>
+                <td>${emp.role}</td>
+                <td>
+                    <input type="number" value="${emp.days}" min="0" max="31" 
+                           style="width: 60px; padding: 0.2rem;" 
+                           onchange="updatePayrollRow(${index}, this.value)">
+                </td>
+                <td>${emp.basic_salary.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-gross-${index}">${emp.gross.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-nssf-${index}">${emp.nssf.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-sha-${index}">${emp.sha.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-levy-${index}">${emp.levy.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-paye-${index}">${emp.paye.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-net-${index}" style="font-weight:bold; color:var(--csl-green);">${emp.net.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            </tr>
+        `;
+    });
+}
+
+function updatePayrollRow(index, newDays) {
+    let days = parseFloat(newDays) || 0;
+    if(days < 0) days = 0;
+    
+    payrollPreviewData[index].days = days;
+    payrollPreviewData[index] = calculatePayrollTaxes(payrollPreviewData[index]);
+    
+    const emp = payrollPreviewData[index];
+    document.getElementById(`row-gross-${index}`).innerText = emp.gross.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-nssf-${index}`).innerText = emp.nssf.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-sha-${index}`).innerText = emp.sha.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-levy-${index}`).innerText = emp.levy.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-paye-${index}`).innerText = emp.paye.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-net-${index}`).innerText = emp.net.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+async function saveFinalPayroll() {
+    const month = document.getElementById('payroll-month').value;
+    const btn = document.getElementById('save-payroll-btn');
+    const statusDiv = document.getElementById('payroll-status');
+    
+    if(!month || payrollPreviewData.length === 0) return;
+
+    btn.innerText = 'Saving...';
+    btn.disabled = true;
 
     try {
-        const response = await fetch(`backend/api.php?action=get_payroll_report&month=${month}`);
+        const response = await fetch('backend/api.php?action=save_payroll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ month: month, records: payrollPreviewData })
+        });
+        
+        const rawText = await response.text();
+        try {
+            const data = JSON.parse(rawText);
+            if(data.status === 'success') {
+                statusDiv.innerHTML = `<i class="fa-solid fa-check"></i> Successfully saved payroll for ${data.count} employees.`;
+                document.getElementById('payroll-preview-section').style.display = 'none';
+            } else {
+                statusDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Error: ${data.message}`;
+            }
+        } catch (jsonErr) {
+            console.error("Backend Error:", rawText);
+            statusDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Backend Error: Did you run the database alter script?`;
+        }
+    } catch(e) {
+        statusDiv.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Error connecting to backend.';
+    } finally {
+        btn.innerHTML = '<i class="fa-solid fa-save"></i> Save Final Payroll';
+        btn.disabled = false;
+    }
+}
+
+// Fetch Payroll Archives (Folders)
+async function loadPayrollArchives() {
+    const tree = document.getElementById('payroll-folder-tree');
+    tree.innerHTML = '<div style="text-align:center; padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading archives...</div>';
+    
+    // Hide report content until a sub-folder is clicked
+    document.getElementById('report-content').style.display = 'none';
+    document.getElementById('report-title-display').innerText = 'Select a Report Folder';
+    
+    try {
+        const response = await fetch('backend/api.php?action=get_payroll_months');
+        const data = await response.json();
+        
+        tree.innerHTML = '';
+        if (data.status === 'success' && data.data.length > 0) {
+            data.data.forEach(month => {
+                tree.innerHTML += `
+                    <div class="folder-month" style="margin-bottom: 0.5rem;">
+                        <div style="cursor: pointer; padding: 0.5rem; background: #f8fafc; border-radius: 4px; display: flex; align-items: center; gap: 10px; font-weight: bold; border: 1px solid #e2e8f0;" onclick="toggleMonthFolder('${month}', this)">
+                            <i class="fa-solid fa-folder text-green" id="icon-month-${month}"></i> 
+                            ${month}
+                        </div>
+                        <div id="subfolders-${month}" style="display: none; padding-left: 1.5rem; padding-top: 0.5rem; border-left: 1px dashed #ccc; margin-left: 0.8rem;">
+                            <!-- Clients loaded here -->
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            tree.innerHTML = '<div style="color:#777; font-size: 0.9rem; padding: 1rem;">No saved payrolls found.</div>';
+        }
+    } catch(e) {
+        tree.innerHTML = '<div style="color:red; font-size: 0.9rem; padding: 1rem;">Error loading archives.</div>';
+    }
+}
+
+async function toggleMonthFolder(month, el) {
+    const sub = document.getElementById(`subfolders-${month}`);
+    const icon = document.getElementById(`icon-month-${month}`);
+    
+    // Toggle visibility
+    if (sub.style.display === 'block') {
+        sub.style.display = 'none';
+        icon.classList.remove('fa-folder-open');
+        icon.classList.add('fa-folder');
+        return;
+    }
+    
+    sub.style.display = 'block';
+    icon.classList.remove('fa-folder');
+    icon.classList.add('fa-folder-open');
+    
+    // If already loaded, don't fetch again
+    if (sub.innerHTML.trim() !== '<!-- Clients loaded here -->') return;
+    
+    sub.innerHTML = '<div style="font-size:0.8rem; color:#888;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>';
+    
+    try {
+        const response = await fetch(`backend/api.php?action=get_payroll_clients&month=${month}`);
+        const data = await response.json();
+        
+        sub.innerHTML = '';
+        if (data.status === 'success') {
+            // Add "All Clients" option
+            sub.innerHTML += `
+                <div style="cursor: pointer; padding: 0.3rem 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; color: var(--csl-dark);" onclick="loadPayrollReport('${month}', 'all', 'All Active Guards')">
+                    <i class="fa-solid fa-file-lines" style="color: var(--csl-green);"></i> All Clients Master Sheet
+                </div>
+            `;
+            
+            data.data.forEach(client => {
+                sub.innerHTML += `
+                    <div style="cursor: pointer; padding: 0.3rem 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; color: #444;" onclick="loadPayrollReport('${month}', '${client.id}', '${client.company_name.replace(/'/g, "\\'")}')">
+                        <i class="fa-solid fa-file-invoice-dollar" style="color: #64748b;"></i> ${client.company_name}
+                    </div>
+                `;
+            });
+        } else {
+            sub.innerHTML = '<div style="font-size:0.8rem; color:red;">Failed to load clients.</div>';
+        }
+    } catch(e) {
+        sub.innerHTML = '<div style="font-size:0.8rem; color:red;">Network Error.</div>';
+    }
+}
+
+// Fetch Payroll Data for Reports
+async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guards') {
+    const list = document.getElementById('payroll-report-list');
+    list.innerHTML = '<tr><td colspan="17" style="text-align:center;">Loading records...</td></tr>';
+    
+    document.getElementById('report-content').style.display = 'block';
+    document.getElementById('report-title-display').innerText = `Payroll Report: ${month} - ${clientName}`;
+
+    try {
+        const response = await fetch(`backend/api.php?action=get_payroll_report&month=${month}&client_id=${clientId}`);
         const data = await response.json();
         
         list.innerHTML = '';
         if (data.status === 'success' && data.data.length > 0) {
             data.data.forEach(p => {
+                const isOldRecord = parseFloat(p.basic_salary || 0) === 0;
+                const daysDisplay = isOldRecord ? '' : (p.days_worked || 30);
+                const basicDisplay = isOldRecord ? '' : parseFloat(p.basic_salary).toLocaleString(undefined, {minimumFractionDigits: 2});
+
                 list.innerHTML += `
                     <tr>
                         <td>${p.first_name} ${p.last_name}</td>
+                        <td>${p.id_number || 'N/A'}</td>
+                        <td>${p.phone_number || 'N/A'}</td>
                         <td>${p.bank_name || 'N/A'}</td>
                         <td>${p.account_number || 'N/A'}</td>
+                        <td>${p.sha_number || 'N/A'}</td>
+                        <td>${p.nssf_number || 'N/A'}</td>
+                        <td>${p.kra_pin || 'N/A'}</td>
+                        <td>${p.role || 'N/A'}</td>
+                        <td>${daysDisplay}</td>
+                        <td>${basicDisplay}</td>
                         <td>${parseFloat(p.gross_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td>${parseFloat(p.nssf_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td>${parseFloat(p.sha_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
@@ -165,7 +406,7 @@ async function loadPayrollReport() {
                 `;
             });
         } else {
-            list.innerHTML = '<tr><td colspan="9" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
+            list.innerHTML = '<tr><td colspan="17" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
         }
     } catch (e) {
         list.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">Backend connection failed.</td></tr>';
