@@ -1,2 +1,10 @@
 ALTER TABLE payroll_records ADD COLUMN days_worked INT DEFAULT 30 AFTER payroll_month;
 ALTER TABLE payroll_records ADD COLUMN basic_salary DECIMAL(10, 2) NOT NULL AFTER days_worked;
+ALTER TABLE payroll_records ADD COLUMN payment_mode ENUM('Bank', 'Sacco') NOT NULL DEFAULT 'Bank' AFTER net_pay;
+ALTER TABLE payroll_records ADD COLUMN payment_provider VARCHAR(100) DEFAULT 'Equity' AFTER payment_mode;
+ALTER TABLE payroll_records ADD COLUMN branch_name VARCHAR(100) AFTER payment_provider;
+ALTER TABLE payroll_records ADD COLUMN region_name VARCHAR(100) AFTER branch_name;
+ALTER TABLE payroll_records ADD COLUMN company_name VARCHAR(200) AFTER region_name;
+ALTER TABLE payroll_records ADD COLUMN client_id INT NULL AFTER company_name;
+ALTER TABLE payroll_records ADD COLUMN account_number VARCHAR(100) AFTER client_id;
+ALTER TABLE payroll_records ADD CONSTRAINT fk_payroll_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;

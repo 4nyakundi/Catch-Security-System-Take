@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS employees (
     section_id INT,
     region_name VARCHAR(100),
     client_id INT NULL,
+    payment_mode ENUM('Bank', 'Sacco') NOT NULL DEFAULT 'Bank',
+    payment_provider VARCHAR(100) DEFAULT 'Equity',
     bank_name VARCHAR(100),
     account_number VARCHAR(100),
     basic_salary DECIMAL(10, 2) NOT NULL,
@@ -71,8 +73,16 @@ CREATE TABLE IF NOT EXISTS payroll_records (
     housing_levy DECIMAL(10, 2) NOT NULL,
     paye_tax DECIMAL(10, 2) NOT NULL,
     net_pay DECIMAL(10, 2) NOT NULL,
+    payment_mode ENUM('Bank', 'Sacco') NOT NULL DEFAULT 'Bank',
+    payment_provider VARCHAR(100) DEFAULT 'Equity',
+    branch_name VARCHAR(100),
+    region_name VARCHAR(100),
+    company_name VARCHAR(200),
+    client_id INT NULL,
+    account_number VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
 );
 
 -- Company Financials (Employer Obligations & VAT)

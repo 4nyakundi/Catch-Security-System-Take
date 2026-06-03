@@ -2,6 +2,31 @@
 // backend/api.php
 header('Content-Type: application/json');
 
+// Convert PHP errors and exceptions into JSON responses (helps the frontend avoid non-JSON replies)
+set_error_handler(function($errno, $errstr, $errfile, $errline){
+    http_response_code(500);
+    echo json_encode(["status" => "error", "message" => "PHP Error: $errstr in $errfile on line $errline"]);
+    exit;
+});
+
+set_exception_handler(function($ex){
+    http_response_code(500);
+    echo json_encode(["status" => "error", "message" => "Uncaught Exception: " . $ex->getMessage()]);
+    exit;
+});
+
+function columnExists($conn, $table, $column) {
+    $stmt = $conn->prepare("SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    if (!$stmt) {
+        return false;
+    }
+    $stmt->bind_param("ss", $table, $column);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    return isset($row['c']) && intval($row['c']) > 0;
+}
+
 // Check if db_connect exists to avoid breaking if not yet set up in XAMPP
 if (file_exists('db_connect.php')) {
     include 'db_connect.php';
@@ -66,7 +91,8 @@ switch ($action) {
 }
 
 function generatePayrollPreview($conn) {
-    $result = $conn->query("SELECT id, first_name, last_name, id_number, phone_number, account_number, sha_number, nssf_number, kra_pin, role, basic_salary FROM employees WHERE status = 'Active'");
+    $sql = "SELECT e.id, e.first_name, e.last_name, e.id_number, e.phone_number, e.account_number, e.sha_number, e.nssf_number, e.kra_pin, e.role, e.basic_salary, e.payment_mode, e.payment_provider, e.bank_name, e.region_name, s.name AS branch_name, c.company_name, e.client_id FROM employees e LEFT JOIN sections s ON e.section_id = s.id LEFT JOIN clients c ON e.client_id = c.id WHERE e.status = 'Active'";
+    $result = $conn->query($sql);
     if (!$result || $result->num_rows == 0) {
         echo json_encode(["status" => "error", "message" => "No active employees found."]);
         return;
@@ -111,8 +137,32 @@ function savePayroll($conn) {
         $total_paye = 0;
         $count = 0;
 
-        $stmt_insert = $conn->prepare("INSERT INTO payroll_records (employee_id, payroll_month, days_worked, basic_salary, gross_pay, nssf_deduction, sha_deduction, housing_levy, paye_tax, net_pay) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $baseColumns = [
+            'employee_id', 'payroll_month', 'days_worked', 'basic_salary', 'gross_pay', 'nssf_deduction', 'sha_deduction', 'housing_levy', 'paye_tax', 'net_pay'
+        ];
+        $optionalColumns = [
+            'payment_mode' => 's',
+            'payment_provider' => 's',
+            'branch_name' => 's',
+            'region_name' => 's',
+            'company_name' => 's',
+            'client_id' => 'i',
+            'account_number' => 's'
+        ];
 
+        $insertColumns = $baseColumns;
+        $typeString = 'isiddddddd';
+        $availableOptionalColumns = [];
+        foreach ($optionalColumns as $col => $type) {
+            if (columnExists($conn, 'payroll_records', $col)) {
+                $insertColumns[] = $col;
+                $typeString .= $type;
+                $availableOptionalColumns[] = $col;
+            }
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+        $stmt_insert = $conn->prepare("INSERT INTO payroll_records (" . implode(', ', $insertColumns) . ") VALUES ($placeholders)");
         if (!$stmt_insert) {
             throw new Exception("Failed to prepare INSERT statement. " . $conn->error);
         }
@@ -127,8 +177,60 @@ function savePayroll($conn) {
             $levy = floatval($rec['levy']);
             $paye = floatval($rec['paye']);
             $net = floatval($rec['net']);
+            $payment_mode = isset($rec['payment_mode']) ? $rec['payment_mode'] : 'Bank';
+            $payment_provider = isset($rec['payment_provider']) ? $rec['payment_provider'] : ($rec['bank_name'] ?? 'Equity');
+            $branch_name = isset($rec['branch_name']) ? $rec['branch_name'] : '';
+            $region_name = isset($rec['region_name']) ? $rec['region_name'] : '';
+            $company_name = isset($rec['company_name']) ? $rec['company_name'] : '';
+            $client_id = isset($rec['client_id']) && $rec['client_id'] !== '' ? intval($rec['client_id']) : null;
+            $account_number = isset($rec['account_number']) ? $rec['account_number'] : '';
 
-            $stmt_insert->bind_param("isiddddddd", $emp_id, $month, $days, $basic, $gross, $nssf, $sha, $levy, $paye, $net);
+            $params = [
+                $typeString,
+                $emp_id,
+                $month,
+                $days,
+                $basic,
+                $gross,
+                $nssf,
+                $sha,
+                $levy,
+                $paye,
+                $net
+            ];
+
+            foreach ($availableOptionalColumns as $col) {
+                switch ($col) {
+                    case 'payment_mode':
+                        $params[] = $payment_mode;
+                        break;
+                    case 'payment_provider':
+                        $params[] = $payment_provider;
+                        break;
+                    case 'branch_name':
+                        $params[] = $branch_name;
+                        break;
+                    case 'region_name':
+                        $params[] = $region_name;
+                        break;
+                    case 'company_name':
+                        $params[] = $company_name;
+                        break;
+                    case 'client_id':
+                        $params[] = $client_id;
+                        break;
+                    case 'account_number':
+                        $params[] = $account_number;
+                        break;
+                }
+            }
+
+            // Bind parameters dynamically
+            $tmp = [];
+            foreach ($params as $key => $value) {
+                $tmp[$key] = &$params[$key];
+            }
+            call_user_func_array([$stmt_insert, 'bind_param'], $tmp);
             $stmt_insert->execute();
 
             // Company obligations
@@ -160,25 +262,67 @@ function savePayroll($conn) {
 function getPayrollReport($conn) {
     $month = isset($_GET['month']) ? $_GET['month'] : '';
     $clientId = isset($_GET['client_id']) ? $_GET['client_id'] : 'all';
+    $hasClientId = columnExists($conn, 'payroll_records', 'client_id');
+    $hasCompanyName = columnExists($conn, 'payroll_records', 'company_name');
+    $hasBranchName = columnExists($conn, 'payroll_records', 'branch_name');
+    $hasRegionName = columnExists($conn, 'payroll_records', 'region_name');
+    $hasPaymentMode = columnExists($conn, 'payroll_records', 'payment_mode');
+    $hasPaymentProvider = columnExists($conn, 'payroll_records', 'payment_provider');
+    $hasAccountNumber = columnExists($conn, 'payroll_records', 'account_number');
 
-    $sql = "SELECT e.first_name, e.last_name, e.bank_name, e.account_number, e.id_number, e.phone_number, e.sha_number, e.nssf_number, e.kra_pin, e.role, p.* 
-            FROM payroll_records p 
-            JOIN employees e ON p.employee_id = e.id 
-            WHERE p.payroll_month = ?";
-            
+    $selectColumns = [
+        'e.first_name',
+        'e.last_name',
+        'e.id_number',
+        'e.phone_number',
+        'e.sha_number',
+        'e.nssf_number',
+        'e.kra_pin',
+        'e.role',
+        'p.basic_salary',
+        ($hasPaymentMode ? 'p.payment_mode' : "'Bank' AS payment_mode"),
+        ($hasPaymentProvider ? 'p.payment_provider' : "'Equity' AS payment_provider"),
+        ($hasAccountNumber ? 'p.account_number' : "'' AS account_number"),
+        ($hasCompanyName ? 'p.company_name' : "'' AS company_name"),
+        ($hasBranchName ? 'p.branch_name' : "'' AS branch_name"),
+        ($hasRegionName ? 'p.region_name' : "'' AS region_name"),
+        'p.gross_pay',
+        'p.nssf_deduction',
+        'p.sha_deduction',
+        'p.housing_levy',
+        'p.paye_tax',
+        'p.net_pay',
+        'p.days_worked'
+    ];
+
+    $sql = "SELECT " . implode(', ', $selectColumns) . " FROM payroll_records p LEFT JOIN employees e ON p.employee_id = e.id WHERE p.payroll_month = ?";
+
     if ($clientId === 'unassigned') {
-        $sql .= " AND e.client_id IS NULL";
+        if ($hasClientId) {
+            $sql .= " AND p.client_id IS NULL";
+        } else {
+            $sql .= " AND (p.company_name IS NULL OR p.company_name = '')";
+        }
     } else if ($clientId !== 'all') {
-        $sql .= " AND e.client_id = ?";
+        if ($hasClientId && is_numeric($clientId)) {
+            $sql .= " AND p.client_id = ?";
+        } else {
+            $sql .= " AND p.company_name = ?";
+        }
     }
 
     $stmt = $conn->prepare($sql);
     if($stmt) {
         if ($clientId !== 'all' && $clientId !== 'unassigned') {
-            $stmt->bind_param("si", $month, $clientId);
+            if ($hasClientId && is_numeric($clientId)) {
+                $stmt->bind_param("si", $month, $clientId);
+            } else {
+                $stmt->bind_param("ss", $month, $clientId);
+            }
         } else {
             $stmt->bind_param("s", $month);
         }
+
         $stmt->execute();
         $result = $stmt->get_result();
         $data = [];
@@ -205,40 +349,55 @@ function getPayrollMonths($conn) {
 
 function getPayrollClients($conn) {
     $month = isset($_GET['month']) ? $_GET['month'] : '';
-    
-    // Get clients that have at least one employee in the payroll for this month
-    $sql = "SELECT DISTINCT c.id, c.company_name 
-            FROM payroll_records p 
-            JOIN employees e ON p.employee_id = e.id 
-            JOIN clients c ON e.client_id = c.id 
-            WHERE p.payroll_month = ? ORDER BY c.company_name ASC";
-            
-    $stmt = $conn->prepare($sql);
+    $hasClientId = columnExists($conn, 'payroll_records', 'client_id');
+    $hasCompanyName = columnExists($conn, 'payroll_records', 'company_name');
     $clients = [];
-    if($stmt) {
-        $stmt->bind_param("s", $month);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        while($row = $result->fetch_assoc()) {
-            $clients[] = $row;
+
+    if ($hasClientId) {
+        if ($hasCompanyName) {
+            $sql = "SELECT DISTINCT p.client_id AS id, p.company_name FROM payroll_records p WHERE p.payroll_month = ? AND p.client_id IS NOT NULL ORDER BY p.company_name ASC";
+        } else {
+            $sql = "SELECT DISTINCT p.client_id AS id, COALESCE(c.company_name, '') AS company_name FROM payroll_records p LEFT JOIN clients c ON p.client_id = c.id WHERE p.payroll_month = ? AND p.client_id IS NOT NULL ORDER BY c.company_name ASC";
         }
-        
-        // Also check if there are unassigned employees
-        $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p JOIN employees e ON p.employee_id = e.id WHERE p.payroll_month = ? AND e.client_id IS NULL";
-        $stmtU = $conn->prepare($sqlUnassigned);
-        if ($stmtU) {
-            $stmtU->bind_param("s", $month);
-            $stmtU->execute();
-            $resU = $stmtU->get_result()->fetch_assoc();
-            if ($resU && $resU['count'] > 0) {
-                $clients[] = ["id" => "unassigned", "company_name" => "Unassigned / Floating Guards"];
+        $stmt = $conn->prepare($sql);
+        if($stmt) {
+            $stmt->bind_param("s", $month);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while($row = $result->fetch_assoc()) {
+                $clients[] = $row;
             }
         }
-        
-        echo json_encode(["status" => "success", "data" => $clients]);
     } else {
-        echo json_encode(["status" => "error", "message" => "Database query failed."]);
+        $sql = "SELECT DISTINCT p.company_name FROM payroll_records p WHERE p.payroll_month = ? AND p.company_name IS NOT NULL AND p.company_name != '' ORDER BY p.company_name ASC";
+        $stmt = $conn->prepare($sql);
+        if($stmt) {
+            $stmt->bind_param("s", $month);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while($row = $result->fetch_assoc()) {
+                $clients[] = ["id" => $row['company_name'], "company_name" => $row['company_name']];
+            }
+        }
     }
+
+    // Also check if there are unassigned employees
+    if ($hasClientId) {
+        $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p WHERE p.payroll_month = ? AND p.client_id IS NULL";
+    } else {
+        $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p WHERE p.payroll_month = ? AND (p.company_name IS NULL OR p.company_name = '')";
+    }
+    $stmtU = $conn->prepare($sqlUnassigned);
+    if ($stmtU) {
+        $stmtU->bind_param("s", $month);
+        $stmtU->execute();
+        $resU = $stmtU->get_result()->fetch_assoc();
+        if ($resU && $resU['count'] > 0) {
+            $clients[] = ["id" => "unassigned", "company_name" => "Unassigned / Floating Guards"];
+        }
+    }
+    
+    echo json_encode(["status" => "success", "data" => $clients]);
 }
 
 function getCompanyTaxes($conn) {
@@ -282,18 +441,20 @@ function addEmployee($conn) {
     $section = intval($data['section_id']);
     $region = isset($data['region_name']) ? $data['region_name'] : '';
     $clientId = !empty($data['client_id']) ? intval($data['client_id']) : null;
+    $payment_mode = isset($data['payment_mode']) ? $data['payment_mode'] : 'Bank';
+    $payment_provider = isset($data['payment_provider']) ? $data['payment_provider'] : '';
     $salary = floatval($data['basic_salary']);
     $bank_name = isset($data['bank_name']) ? $data['bank_name'] : '';
     $account_number = isset($data['account_number']) ? $data['account_number'] : '';
 
     // Map section IDs if they are 1,2,3,4.
-    $sql = "INSERT INTO employees (first_name, last_name, id_number, phone_number, home_location, kra_pin, nssf_number, sha_number, role, section_id, region_name, client_id, basic_salary, bank_name, account_number) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO employees (first_name, last_name, id_number, phone_number, home_location, kra_pin, nssf_number, sha_number, role, section_id, region_name, client_id, payment_mode, payment_provider, bank_name, account_number, basic_salary) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     try {
         $stmt = $conn->prepare($sql);
         if($stmt) {
-            $stmt->bind_param("sssssssssisidss", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $salary, $bank_name, $account_number);
+            $stmt->bind_param("sssssssssisissdss", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary);
             if($stmt->execute()) {
                 echo json_encode(["status" => "success", "message" => "Employee added successfully"]);
             } else {
@@ -334,16 +495,18 @@ function updateEmployee($conn) {
     $section = intval($data['section_id']);
     $region = isset($data['region_name']) ? $data['region_name'] : '';
     $clientId = !empty($data['client_id']) ? intval($data['client_id']) : null;
+    $payment_mode = isset($data['payment_mode']) ? $data['payment_mode'] : 'Bank';
+    $payment_provider = isset($data['payment_provider']) ? $data['payment_provider'] : '';
     $salary = floatval($data['basic_salary']);
     $bank_name = isset($data['bank_name']) ? $data['bank_name'] : '';
     $account_number = isset($data['account_number']) ? $data['account_number'] : '';
 
-    $sql = "UPDATE employees SET first_name=?, last_name=?, id_number=?, phone_number=?, home_location=?, kra_pin=?, nssf_number=?, sha_number=?, role=?, section_id=?, region_name=?, client_id=?, basic_salary=?, bank_name=?, account_number=? WHERE id=?";
+    $sql = "UPDATE employees SET first_name=?, last_name=?, id_number=?, phone_number=?, home_location=?, kra_pin=?, nssf_number=?, sha_number=?, role=?, section_id=?, region_name=?, client_id=?, payment_mode=?, payment_provider=?, bank_name=?, account_number=?, basic_salary=? WHERE id=?";
     
     try {
         $stmt = $conn->prepare($sql);
         if($stmt) {
-            $stmt->bind_param("sssssssssisidssi", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $salary, $bank_name, $account_number, $id);
+            $stmt->bind_param("sssssssssisissdssi", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary, $id);
             if($stmt->execute()) {
                 echo json_encode(["status" => "success", "message" => "Employee updated successfully"]);
             } else {

@@ -227,6 +227,8 @@
                                 <th>NSSF No</th>
                                 <th>KRA PIN</th>
                                 <th>Position</th>
+                                <th>Payment Mode</th>
+                                <th>Provider</th>
                                 <th>Days</th>
                                 <th>Gross 1 (Basic)</th>
                                 <th>Gross 2 (Actual)</th>
@@ -234,6 +236,8 @@
                                 <th>SHA</th>
                                 <th>Levy</th>
                                 <th>PAYE</th>
+                                <th>UNIF</th>
+                                <th>Total Deduction</th>
                                 <th>Net Pay</th>
                             </tr>
                         </thead>
@@ -311,13 +315,43 @@
                             <p style="margin: 0.4rem 0 0 0; font-size: 10px; font-style: italic; color: var(--csl-dark);">Security Guards, Patrols, Alarmed Response, Private Investigations, Cash-In-Transit,<br>Escorts, Electric Fencing @ General Security Procuring</p>
                         </div>
                     </div>
+                    <div id="payroll-sacco-summary" style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div style="flex: 1; min-width: 260px; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 10px; padding: 0.8rem;">
+                            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #0f172a;">CIA TABASURI SACCO</h4>
+                            <div id="tabasuri-sacco-list" style="font-size: 0.85rem; color: #334155;">No records yet.</div>
+                        </div>
+                        <div style="flex: 1; min-width: 260px; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 10px; padding: 0.8rem;">
+                            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #0f172a;">IMARIKA SACCO</h4>
+                            <div id="imarika-sacco-list" style="font-size: 0.85rem; color: #334155;">No records yet.</div>
+                        </div>
+                        <div style="flex: 1; min-width: 260px; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 10px; padding: 0.8rem;">
+                            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #0f172a;">Bank Payment Summary</h4>
+                            <div id="bank-summary-count" style="font-size: 0.95rem; color: #334155;">0 payment(s)</div>
+                            <div id="bank-summary-total" style="font-size: 0.85rem; color: #334155;">Total Net: Ksh 0.00</div>
+                        </div>
+                        <div style="flex: 1; min-width: 260px; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 10px; padding: 0.8rem;">
+                            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #0f172a;">Sacco Payment Summary</h4>
+                            <div id="sacco-summary-count" style="font-size: 0.95rem; color: #334155;">0 payment(s)</div>
+                            <div id="sacco-summary-total" style="font-size: 0.85rem; color: #334155;">Total Net: Ksh 0.00</div>
+                        </div>
+                    </div>
+                    <!-- Per-company payment breakdown -->
+                    <div id="company-payment-breakdown" style="margin-bottom: 1rem; display: none;">
+                        <h3 style="margin:0 0 0.5rem 0; color:var(--csl-green);">Company Payment Breakdown</h3>
+                        <div id="company-breakdown-list" style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                            <!-- Filled by JS: per-company bank vs sacco counts/totals -->
+                        </div>
+                    </div>
                     <table id="payroll-report-table" style="font-size: 11px; white-space: nowrap;">
-                        <thead>
+                        <thead id="payroll-report-head">
                             <tr>
                                 <th>Emp Name</th>
                                 <th>ID No</th>
                                 <th>Phone</th>
-                                <th>Bank Name</th>
+                                <th>Payment Mode</th>
+                                <th>Provider</th>
+                                <th>Company</th>
+                                <th>Branch</th>
                                 <th>Account No.</th>
                                 <th>SHA No</th>
                                 <th>NSSF No</th>
@@ -326,10 +360,12 @@
                                 <th>Days</th>
                                 <th>Gross 1 (Basic)</th>
                                 <th>Gross 2 (Actual)</th>
-                                <th>NSSF</th>
-                                <th>SHA (2.75%)</th>
-                                <th>Housing Levy</th>
                                 <th>PAYE</th>
+                                <th>SHA</th>
+                                <th>NSSF</th>
+                                <th>UNIF</th>
+                                <th>Housing Levy</th>
+                                <th>Total Deduction</th>
                                 <th>Net Pay</th>
                             </tr>
                         </thead>
@@ -429,11 +465,22 @@
                 </div>
 
                 <!-- PAYMENT DETAILS SECTION -->
-                <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--csl-dark); border-bottom: 2px solid #eee; padding-bottom: 0.3rem;">Payment Details (Direct Deposit)</h4>
+                <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--csl-dark); border-bottom: 2px solid #eee; padding-bottom: 0.3rem;">Payment Details</h4>
                 <div class="dashboard-grid">
                     <div class="form-group">
-                        <label>Bank Name</label>
-                        <input type="text" id="emp-bank" class="form-control" placeholder="e.g. Equity Bank, KCB, Absa">
+                        <label>Payment Mode</label>
+                        <select id="emp-payment-mode" class="form-control" required onchange="updatePaymentProviderOptions()">
+                            <option value="Bank">Bank</option>
+                            <option value="Sacco">Sacco</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Provider</label>
+                        <select id="emp-provider" class="form-control" required>
+                            <option value="Equity">Equity</option>
+                            <option value="NCBA">NCBA</option>
+                            <option value="DTB Bank">DTB Bank</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label>Account Number</label>

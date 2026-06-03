@@ -34,6 +34,12 @@ function switchTab(tabId, el, sectionId = null) {
     }
 }
 
+// Utility: escape text for safe HTML insertion
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function toggleSectionsMenu() {
     const menu = document.getElementById('sections-submenu');
     menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -130,11 +136,31 @@ async function generatePayrollPreview() {
         
         if(data.status === 'success') {
             payrollPreviewData = data.data.map(emp => {
-                // Initialize default calculations for 30 days
                 emp.basic_salary = parseFloat(emp.basic_salary) || 0;
                 emp.days = 30;
-                emp.gross = emp.basic_salary; // Gross 2 (Actual)
-                
+                emp.payment_mode = emp.payment_mode || 'Bank';
+                emp.payment_provider = emp.payment_provider || emp.bank_name || 'Equity';
+
+                const saccoMapping = {
+                    'Mombasa': {
+                        'Nyali': 'CIA TABASURI SACCO',
+                        'Mtwapa': 'CIA TABASURI SACCO',
+                        'Mombasa Cbd': 'CIA TABASURI SACCO',
+                        'Changamwe': 'CIA TABASURI SACCO'
+                    },
+                    'Nairobi': {
+                        'Nairobi Cbd': 'IMARIKA SACCO'
+                    }
+                };
+                if (emp.payment_mode === 'Sacco' && emp.branch_name && emp.region_name) {
+                    const mappedProvider = saccoMapping[emp.branch_name] ? saccoMapping[emp.branch_name][emp.region_name] : null;
+                    if (mappedProvider) emp.payment_provider = mappedProvider;
+                }
+
+                emp.account_number = emp.account_number || '';
+                emp.sha_number = emp.sha_number || '';
+                emp.nssf_number = emp.nssf_number || '';
+                emp.kra_pin = emp.kra_pin || '';
                 return calculatePayrollTaxes(emp);
             });
             
@@ -150,20 +176,13 @@ async function generatePayrollPreview() {
 }
 
 function calculatePayrollTaxes(emp) {
-    // 1. Gross 2 based on days
     emp.gross = (emp.basic_salary / 30) * emp.days;
     let gross = emp.gross;
 
-    // 2. NSSF: 6% capped at Ksh 2,160 (for 2024 tier 2 upper limit)
     emp.nssf = Math.min(gross * 0.06, 2160);
-    
-    // 3. SHA: 2.75% of gross
     emp.sha = gross * 0.0275;
-    
-    // 4. Housing Levy: 1.5% of gross
     emp.levy = gross * 0.015;
 
-    // 5. PAYE (Simplified 2024 logic)
     let taxable = gross - emp.nssf - emp.levy;
     let paye = 0;
     if(taxable > 24000) {
@@ -179,11 +198,13 @@ function calculatePayrollTaxes(emp) {
         } else {
             tax += (taxable - 24000) * 0.25;
         }
-        paye = Math.max(0, tax - 2400); // subtract personal relief
+        paye = Math.max(0, tax - 2400);
     }
     emp.paye = paye;
-    
-    emp.net = gross - emp.nssf - emp.sha - emp.levy - emp.paye;
+
+    emp.unif = (emp.payment_mode === 'Bank' && ['Equity', 'NCBA', 'DTB Bank'].includes(emp.payment_provider)) ? 300 : 0;
+    emp.total_deduction = emp.nssf + emp.sha + emp.levy + emp.paye + emp.unif;
+    emp.net = gross - emp.total_deduction;
 
     return emp;
 }
@@ -193,7 +214,7 @@ function renderPayrollPreviewTable() {
     list.innerHTML = '';
     
     if(payrollPreviewData.length === 0) {
-        list.innerHTML = '<tr><td colspan="16" style="text-align:center;">No active employees found.</td></tr>';
+        list.innerHTML = '<tr><td colspan="20" style="text-align:center;">No active employees found.</td></tr>';
         return;
     }
 
@@ -208,6 +229,8 @@ function renderPayrollPreviewTable() {
                 <td>${emp.nssf_number || 'N/A'}</td>
                 <td>${emp.kra_pin || 'N/A'}</td>
                 <td>${emp.role}</td>
+                <td>${emp.payment_mode}</td>
+                <td>${emp.payment_provider}</td>
                 <td>
                     <input type="number" value="${emp.days}" min="0" max="31" 
                            style="width: 60px; padding: 0.2rem;" 
@@ -219,6 +242,8 @@ function renderPayrollPreviewTable() {
                 <td id="row-sha-${index}">${emp.sha.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td id="row-levy-${index}">${emp.levy.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td id="row-paye-${index}">${emp.paye.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-unif-${index}">${emp.unif.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td id="row-total-${index}">${emp.total_deduction.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td id="row-net-${index}" style="font-weight:bold; color:var(--csl-green);">${emp.net.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
             </tr>
         `;
@@ -238,6 +263,8 @@ function updatePayrollRow(index, newDays) {
     document.getElementById(`row-sha-${index}`).innerText = emp.sha.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     document.getElementById(`row-levy-${index}`).innerText = emp.levy.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     document.getElementById(`row-paye-${index}`).innerText = emp.paye.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-unif-${index}`).innerText = emp.unif.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById(`row-total-${index}`).innerText = emp.total_deduction.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     document.getElementById(`row-net-${index}`).innerText = emp.net.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
@@ -338,8 +365,23 @@ async function toggleMonthFolder(month, el) {
     
     try {
         const response = await fetch(`backend/api.php?action=get_payroll_clients&month=${month}`);
-        const data = await response.json();
-        
+        if (!response.ok) {
+            const rawText = await response.text();
+            console.error('Failed to fetch payroll clients', response.status, rawText);
+            sub.innerHTML = `<div style="font-size:0.8rem; color:red;">Error loading clients: ${response.status} ${response.statusText}. <a href="#" onclick="toggleMonthFolder('${month}', this); return false;">Retry</a><div style="font-size:0.75rem; color:#666; margin-top:6px;">${escapeHtml(rawText)}</div></div>`;
+            return;
+        }
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (parseErr) {
+            const raw = await response.text();
+            console.error('Invalid JSON returned for payroll clients:', raw);
+            sub.innerHTML = `<div style="font-size:0.8rem; color:red;">Invalid server response. <a href="#" onclick="loadPayrollArchives(); return false;">Retry</a><pre style="white-space:pre-wrap; font-size:0.75rem; color:#666;">${escapeHtml(raw)}</pre></div>`;
+            return;
+        }
+
         sub.innerHTML = '';
         if (data.status === 'success') {
             // Add "All Clients" option
@@ -348,47 +390,110 @@ async function toggleMonthFolder(month, el) {
                     <i class="fa-solid fa-file-lines" style="color: var(--csl-green);"></i> All Clients Master Sheet
                 </div>
             `;
-            
+
             data.data.forEach(client => {
+                const safeName = escapeHtml(client.company_name || 'Unknown');
+                const clientId = escapeHtml(String(client.id));
                 sub.innerHTML += `
-                    <div style="cursor: pointer; padding: 0.3rem 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; color: #444;" onclick="loadPayrollReport('${month}', '${client.id}', '${client.company_name.replace(/'/g, "\\'")}')">
-                        <i class="fa-solid fa-file-invoice-dollar" style="color: #64748b;"></i> ${client.company_name}
+                    <div style="cursor: pointer; padding: 0.3rem 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; color: #444;" onclick="loadPayrollReport('${month}', '${clientId}', '${(client.company_name||'').replace(/'/g, "\\'")}')">
+                        <i class="fa-solid fa-file-invoice-dollar" style="color: #64748b;"></i> ${safeName}
                     </div>
                 `;
             });
         } else {
-            sub.innerHTML = '<div style="font-size:0.8rem; color:red;">Failed to load clients.</div>';
+            sub.innerHTML = `<div style="font-size:0.8rem; color:red;">Failed to load clients: ${escapeHtml(data.message || 'Unknown error')}</div>`;
         }
     } catch(e) {
-        sub.innerHTML = '<div style="font-size:0.8rem; color:red;">Network Error.</div>';
+        console.error('Error fetching payroll clients:', e);
+        sub.innerHTML = '<div style="font-size:0.8rem; color:red;">Network Error. <a href="#" onclick="loadPayrollArchives(); return false;">Retry</a></div>';
     }
 }
 
 // Fetch Payroll Data for Reports
 async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guards') {
     const list = document.getElementById('payroll-report-list');
-    list.innerHTML = '<tr><td colspan="17" style="text-align:center;">Loading records...</td></tr>';
+    list.innerHTML = '<tr><td colspan="22" style="text-align:center;">Loading records...</td></tr>';
     
     document.getElementById('report-content').style.display = 'block';
     document.getElementById('report-title-display').innerText = `Payroll Report: ${month} - ${clientName}`;
 
     try {
         const response = await fetch(`backend/api.php?action=get_payroll_report&month=${month}&client_id=${clientId}`);
-        const data = await response.json();
+        if (!response.ok) {
+            const raw = await response.text();
+            console.error('Failed to fetch payroll report', response.status, raw);
+            list.innerHTML = `<tr><td colspan="22" style="text-align:center; color:red;">Error loading payroll report: ${response.status} ${response.statusText}. See console for details.</td></tr>`;
+            return;
+        }
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (parseErr) {
+            const raw = await response.text();
+            console.error('Invalid JSON for payroll report:', raw);
+            list.innerHTML = `<tr><td colspan="22" style="text-align:center; color:red;">Invalid server response. Check console for details.</td></tr>`;
+            return;
+        }
         
+        const tabasuriList = [];
+        const imarikaList = [];
+        let bankCount = 0;
+        let saccoCount = 0;
+        let bankTotalNet = 0;
+        let saccoTotalNet = 0;
+        let companyMap = {};
         list.innerHTML = '';
         if (data.status === 'success' && data.data.length > 0) {
             data.data.forEach(p => {
                 const isOldRecord = parseFloat(p.basic_salary || 0) === 0;
                 const daysDisplay = isOldRecord ? '' : (p.days_worked || 30);
                 const basicDisplay = isOldRecord ? '' : parseFloat(p.basic_salary).toLocaleString(undefined, {minimumFractionDigits: 2});
+                const paymentMode = p.payment_mode || 'Bank';
+                const paymentProvider = p.payment_provider || 'N/A';
+                const companyName = p.company_name || 'Unassigned / Floating Guard';
+                const branchName = p.branch_name || p.region_name || 'N/A';
+                const unifAmount = paymentMode === 'Bank' ? 300 : 0;
+                const totalDeduction = parseFloat(p.nssf_deduction || 0) + parseFloat(p.sha_deduction || 0) + parseFloat(p.housing_levy || 0) + parseFloat(p.paye_tax || 0) + unifAmount;
+                const netAmount = parseFloat(p.net_pay || 0);
+
+                // Track per-company aggregates (bank vs sacco)
+                const compKey = companyName;
+                if (!companyMap[compKey]) {
+                    companyMap[compKey] = { bankCount: 0, saccoCount: 0, bankNet: 0, saccoNet: 0 };
+                }
+                if (paymentMode === 'Bank') {
+                    companyMap[compKey].bankCount += 1;
+                    companyMap[compKey].bankNet += netAmount;
+                } else {
+                    companyMap[compKey].saccoCount += 1;
+                    companyMap[compKey].saccoNet += netAmount;
+                }
+
+                if (paymentMode === 'Bank') {
+                    bankCount += 1;
+                    bankTotalNet += netAmount;
+                } else {
+                    saccoCount += 1;
+                    saccoTotalNet += netAmount;
+                }
+
+                if (paymentMode === 'Sacco' && paymentProvider === 'CIA TABASURI SACCO') {
+                    tabasuriList.push(`${p.first_name} ${p.last_name} (${branchName}, ${companyName})`);
+                }
+                if (paymentMode === 'Sacco' && paymentProvider === 'IMARIKA SACCO') {
+                    imarikaList.push(`${p.first_name} ${p.last_name} (${branchName}, ${companyName})`);
+                }
 
                 list.innerHTML += `
                     <tr>
                         <td>${p.first_name} ${p.last_name}</td>
                         <td>${p.id_number || 'N/A'}</td>
                         <td>${p.phone_number || 'N/A'}</td>
-                        <td>${p.bank_name || 'N/A'}</td>
+                        <td>${paymentMode}</td>
+                        <td>${paymentProvider}</td>
+                        <td>${companyName}</td>
+                        <td>${branchName}</td>
                         <td>${p.account_number || 'N/A'}</td>
                         <td>${p.sha_number || 'N/A'}</td>
                         <td>${p.nssf_number || 'N/A'}</td>
@@ -397,19 +502,53 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
                         <td>${daysDisplay}</td>
                         <td>${basicDisplay}</td>
                         <td>${parseFloat(p.gross_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td>${parseFloat(p.nssf_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td>${parseFloat(p.sha_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td>${parseFloat(p.housing_levy).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td>${parseFloat(p.paye_tax).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>${parseFloat(p.sha_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>${parseFloat(p.nssf_deduction).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>${unifAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>${parseFloat(p.housing_levy).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>${totalDeduction.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td style="font-weight:bold; color:var(--csl-green);">${parseFloat(p.net_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                     </tr>
                 `;
             });
+
+            // Render per-company breakdown
+            const breakdownEl = document.getElementById('company-breakdown-list');
+            if (breakdownEl) {
+                breakdownEl.innerHTML = '';
+                Object.keys(companyMap).forEach(comp => {
+                    const stats = companyMap[comp];
+                    breakdownEl.innerHTML += `
+                        <div style="min-width:220px; background:#f8fafc; border:1px solid #e2e8f0; padding:0.6rem; border-radius:8px;">
+                            <div style="font-weight:700; color:var(--csl-dark); margin-bottom:0.25rem;">${comp}</div>
+                            <div style="font-size:0.85rem; color:#334155;">Bank: ${stats.bankCount} (Ksh ${stats.bankNet.toLocaleString(undefined, {minimumFractionDigits:2})})</div>
+                            <div style="font-size:0.85rem; color:#334155;">Sacco: ${stats.saccoCount} (Ksh ${stats.saccoNet.toLocaleString(undefined, {minimumFractionDigits:2})})</div>
+                        </div>
+                    `;
+                });
+                document.getElementById('company-payment-breakdown').style.display = 'block';
+            }
+
+            document.getElementById('tabasuri-sacco-list').innerHTML = tabasuriList.length > 0 ? tabasuriList.map(item => `<div style="margin-bottom:0.25rem;">• ${item}</div>`).join('') : '<span style="color:#64748b;">No CIA TABASURI SACCO payments in this report.</span>';
+            document.getElementById('imarika-sacco-list').innerHTML = imarikaList.length > 0 ? imarikaList.map(item => `<div style="margin-bottom:0.25rem;">• ${item}</div>`).join('') : '<span style="color:#64748b;">No IMARIKA SACCO payments in this report.</span>';
+            document.getElementById('bank-summary-count').innerText = `${bankCount} Bank payment(s)`;
+            document.getElementById('bank-summary-total').innerText = `Total Net: Ksh ${bankTotalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            document.getElementById('sacco-summary-count').innerText = `${saccoCount} Sacco payment(s)`;
+            document.getElementById('sacco-summary-total').innerText = `Total Net: Ksh ${saccoTotalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
         } else {
-            list.innerHTML = '<tr><td colspan="17" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
+            list.innerHTML = '<tr><td colspan="22" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
+            document.getElementById('tabasuri-sacco-list').innerHTML = '<span style="color:#64748b;">No CIA TABASURI SACCO payments in this report.</span>';
+            document.getElementById('imarika-sacco-list').innerHTML = '<span style="color:#64748b;">No IMARIKA SACCO payments in this report.</span>';
+            document.getElementById('bank-summary-count').innerText = '0 Bank payment(s)';
+            document.getElementById('bank-summary-total').innerText = 'Total Net: Ksh 0.00';
+            document.getElementById('sacco-summary-count').innerText = '0 Sacco payment(s)';
+            document.getElementById('sacco-summary-total').innerText = 'Total Net: Ksh 0.00';
         }
     } catch (e) {
-        list.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">Backend connection failed.</td></tr>';
+        list.innerHTML = '<tr><td colspan="22" style="text-align:center; color:red;">Backend connection failed.</td></tr>';
+        document.getElementById('tabasuri-sacco-list').innerHTML = '<span style="color:#64748b;">No CIA TABASURI SACCO payments in this report.</span>';
+        document.getElementById('imarika-sacco-list').innerHTML = '<span style="color:#64748b;">No IMARIKA SACCO payments in this report.</span>';
     }
 }
 
@@ -477,6 +616,7 @@ async function openAddEmployeeModal() {
     document.getElementById('addEmployeeModal').style.display = 'block';
     document.getElementById('emp-submit-status').innerText = '';
     updateRegionsDropdown();
+    updatePaymentProviderOptions();
     
     // Fetch and populate clients
     populateClientDropdown();
@@ -531,6 +671,54 @@ function updateRegionsDropdown() {
     }
     
     filterClientsLocally();
+    updatePaymentProviderOptions();
+}
+
+function updatePaymentProviderOptions() {
+    const mode = document.getElementById('emp-payment-mode').value;
+    const providerSelect = document.getElementById('emp-provider');
+    const accountInput = document.getElementById('emp-account');
+    const branch = document.getElementById('emp-section').value;
+    const region = document.getElementById('emp-region').value;
+    const currentValue = providerSelect.value;
+
+    const bankOptions = ['Equity', 'NCBA', 'DTB Bank', 'KCB', 'Co-operative Bank'];
+    const saccoOptions = ['CIA TABASURI SACCO', 'IMARIKA SACCO'];
+    const saccoMapping = {
+        '1': {
+            'Nyali': 'CIA TABASURI SACCO',
+            'Mtwapa': 'CIA TABASURI SACCO',
+            'Mombasa Cbd': 'CIA TABASURI SACCO',
+            'Changamwe': 'CIA TABASURI SACCO'
+        },
+        '2': {
+            'Nairobi Cbd': 'IMARIKA SACCO'
+        }
+    };
+
+    providerSelect.innerHTML = '';
+
+    if (mode === 'Sacco') {
+        // Allow any region to pick a Sacco provider. Default to mapped provider if available.
+        providerSelect.disabled = false;
+        providerSelect.innerHTML = '';
+        saccoOptions.forEach(s => {
+            providerSelect.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+        // If there's a mapping for branch+region, preselect the mapped provider, else keep first option
+        const mapped = (saccoMapping[branch] && saccoMapping[branch][region]) ? saccoMapping[branch][region] : null;
+        providerSelect.value = mapped || saccoOptions[0];
+        accountInput.required = false;
+        accountInput.placeholder = 'Optional for Sacco payments';
+    } else {
+        bankOptions.forEach(opt => {
+            providerSelect.innerHTML += `<option value="${opt}">${opt}</option>`;
+        });
+        providerSelect.disabled = false;
+        providerSelect.value = bankOptions.includes(currentValue) ? currentValue : bankOptions[0];
+        accountInput.required = true;
+        accountInput.placeholder = '';
+    }
 }
 
 function editEmployee(id) {
@@ -555,7 +743,9 @@ function editEmployee(id) {
     updateRegionsDropdown();
     document.getElementById('emp-region').value = emp.region_name || '';
     populateClientDropdown(emp.client_id);
-    document.getElementById('emp-bank').value = emp.bank_name || '';
+    document.getElementById('emp-payment-mode').value = emp.payment_mode || 'Bank';
+    updatePaymentProviderOptions();
+    document.getElementById('emp-provider').value = emp.payment_provider || emp.bank_name || 'Equity';
     document.getElementById('emp-account').value = emp.account_number || '';
     document.getElementById('emp-salary').value = emp.basic_salary;
     
@@ -598,7 +788,8 @@ async function submitEmployeeForm(e) {
         section_id: document.getElementById('emp-section').value,
         region_name: document.getElementById('emp-region').value,
         client_id: document.getElementById('emp-client').value,
-        bank_name: document.getElementById('emp-bank').value,
+        payment_mode: document.getElementById('emp-payment-mode').value,
+        payment_provider: document.getElementById('emp-provider').value,
         account_number: document.getElementById('emp-account').value,
         basic_salary: document.getElementById('emp-salary').value
     };
