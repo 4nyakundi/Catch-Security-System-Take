@@ -504,7 +504,7 @@ function addEmployee($conn) {
     try {
         $stmt = $conn->prepare($sql);
         if($stmt) {
-            $stmt->bind_param("sssssssssisissdss", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary);
+            $stmt->bind_param("sssssssssisissssd", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary);
             if($stmt->execute()) {
                 echo json_encode(["status" => "success", "message" => "Employee added successfully"]);
             } else {
@@ -556,7 +556,7 @@ function updateEmployee($conn) {
     try {
         $stmt = $conn->prepare($sql);
         if($stmt) {
-            $stmt->bind_param("sssssssssisissdssi", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary, $id);
+            $stmt->bind_param("sssssssssisissssdi", $fname, $lname, $id_num, $phone, $location, $kra, $nssf, $sha, $role, $section, $region, $clientId, $payment_mode, $payment_provider, $bank_name, $account_number, $salary, $id);
             if($stmt->execute()) {
                 echo json_encode(["status" => "success", "message" => "Employee updated successfully"]);
             } else {
@@ -756,7 +756,7 @@ function deleteClient($conn) {
             if($stmt->execute()) {
                 echo json_encode(["status" => "success", "message" => "Client permanently deleted."]);
             } else {
-                echo json_encode(["status" => "error", "message" => "Failed to update employee"]);
+                echo json_encode(["status" => "error", "message" => "Failed to delete client."]);
             }
         }
     } catch(Exception $e) {

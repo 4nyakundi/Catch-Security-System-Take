@@ -189,9 +189,13 @@ function calculatePayrollTaxes(emp) {
         let tax = 24000 * 0.10;
         if(taxable > 32333) {
             tax += (32333 - 24000) * 0.25;
-            if(taxable > 500000) {
+            if(taxable > 800000) {
                 tax += (500000 - 32333) * 0.30;
-                tax += (taxable - 500000) * 0.35;
+                tax += 300000 * 0.325;
+                tax += (taxable - 800000) * 0.35;
+            } else if(taxable > 500000) {
+                tax += (500000 - 32333) * 0.30;
+                tax += (taxable - 500000) * 0.325;
             } else {
                 tax += (taxable - 32333) * 0.30;
             }
@@ -343,6 +347,9 @@ async function loadPayrollArchives() {
 }
 
 async function toggleMonthFolder(month, el) {
+    // Load monthly summary in the main content pane on month selection
+    loadPayrollReport(month, 'summary_only', 'Executive Summary');
+
     const sub = document.getElementById(`subfolders-${month}`);
     const icon = document.getElementById(`icon-month-${month}`);
     
@@ -415,10 +422,27 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
     list.innerHTML = '<tr><td colspan="22" style="text-align:center;">Loading records...</td></tr>';
     
     document.getElementById('report-content').style.display = 'block';
-    document.getElementById('report-title-display').innerText = `Payroll Report: ${month} - ${clientName}`;
+    document.getElementById('report-title-display').innerText = (clientId === 'summary_only') ? `Payroll Summary: ${month}` : `Payroll Report: ${month} - ${clientName}`;
+
+    // Layout configuration: show summaries only on month folder click (summary_only)
+    const saccoSummary = document.getElementById('payroll-sacco-summary');
+    const companyBreakdown = document.getElementById('company-payment-breakdown');
+    const reportTable = document.getElementById('payroll-report-table');
+
+    if (clientId === 'summary_only') {
+        if (saccoSummary) saccoSummary.style.display = 'flex';
+        if (companyBreakdown) companyBreakdown.style.display = 'block';
+        if (reportTable) reportTable.style.display = 'none';
+    } else {
+        if (saccoSummary) saccoSummary.style.display = 'none';
+        if (companyBreakdown) companyBreakdown.style.display = 'none';
+        if (reportTable) reportTable.style.display = 'table';
+    }
+
+    const fetchClientId = (clientId === 'summary_only') ? 'all' : clientId;
 
     try {
-        const response = await fetch(`backend/api.php?action=get_payroll_report&month=${month}&client_id=${clientId}`);
+        const response = await fetch(`backend/api.php?action=get_payroll_report&month=${month}&client_id=${fetchClientId}`);
         if (!response.ok) {
             const raw = await response.text();
             console.error('Failed to fetch payroll report', response.status, raw);
@@ -579,15 +603,74 @@ async function loadCompanyTaxes() {
 
 // Export to Excel using SheetJS
 function exportToExcel() {
-    let table = document.getElementById("payroll-report-table");
-    let wb = XLSX.utils.table_to_book(table, {sheet: "Payroll Report"});
+    const table = document.getElementById("payroll-report-table");
+    if (!table) return;
+
+    // Get headers
+    const headers = [];
+    table.querySelectorAll("thead th").forEach(th => {
+        headers.push(th.innerText);
+    });
+
+    // Get rows
+    const dataRows = [];
+    table.querySelectorAll("tbody tr").forEach(tr => {
+        const rowData = [];
+        tr.querySelectorAll("td").forEach(td => {
+            const val = td.innerText.trim();
+            const cleanVal = val.replace(/,/g, '');
+            if (cleanVal !== '' && !isNaN(cleanVal) && isFinite(cleanVal)) {
+                rowData.push(Number(cleanVal));
+            } else {
+                rowData.push(val);
+            }
+        });
+        if (rowData.length > 0) {
+            dataRows.push(rowData);
+        }
+    });
+
+    const reportTitle = document.getElementById('report-title-display').innerText;
+
+    // Construct 2D array with letterhead header and verification footer
+    const excelData = [
+        ["CATCH SECURITY LINKS LIMITED"],
+        ["P.O. BOX 3360 – 80100 – GPO MOMBASA"],
+        ["TEL: (+254) 0538013251 / 0722 235 217 / 0722 279 890, E-mail-admin@catchsecuritylinksltd.co.ke"],
+        ["Security Guards, Patrols, Alarmed Response, Private Investigations, Cash-In-Transit, Escorts, Electric Fencing @ General Security Procuring"],
+        [],
+        [reportTitle],
+        [],
+        headers,
+        ...dataRows,
+        [],
+        [],
+        ["Prepared By: ___________________________", "", "", "", "", "", "Confirmed By: ___________________________"],
+        ["Designation: ___________________________", "", "", "", "", "", "Designation: ___________________________"],
+        ["Signature:   ___________________________", "", "", "", "", "", "Signature:   ___________________________"],
+        ["Date:        ___________________________", "", "", "", "", "", "Date:        ___________________________"]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Payroll Report");
+
     XLSX.writeFile(wb, "Catch_Security_Payroll_Report.xlsx");
 }
 
 // Export to PDF using html2pdf
 function exportToPDF() {
     const element = document.getElementById('report-content');
+    const companyBreakdown = document.getElementById('company-payment-breakdown');
     
+    // Remember original display value
+    const originalBreakdownDisplay = companyBreakdown ? companyBreakdown.style.display : 'none';
+    
+    // Hide company breakdown for the PDF export
+    if (companyBreakdown) {
+        companyBreakdown.style.display = 'none';
+    }
+
     // Temporarily remove overflow constraints so html2canvas doesn't clip the table
     element.classList.remove('table-container');
     element.style.overflow = 'visible';
@@ -604,6 +687,11 @@ function exportToPDF() {
         // Restore properties after export
         element.classList.add('table-container');
         element.style.overflow = '';
+        
+        // Restore company breakdown display
+        if (companyBreakdown) {
+            companyBreakdown.style.display = originalBreakdownDisplay;
+        }
     });
 }
 
