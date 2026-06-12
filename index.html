@@ -423,6 +423,10 @@
                         <input type="text" id="emp-location" class="form-control" required>
                     </div>
                     <div class="form-group">
+                        <label>Next of Kin</label>
+                        <input type="text" id="emp-next-of-kin" class="form-control" required>
+                    </div>
+                    <div class="form-group">
                         <label>KRA PIN</label>
                         <input type="text" id="emp-kra" class="form-control" required>
                     </div>
@@ -442,20 +446,6 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Branch</label>
-                        <select id="emp-section" class="form-control" required onchange="updateRegionsDropdown()">
-                            <option value="">Select Branch</option>
-                            <option value="1">Mombasa Branch</option>
-                            <option value="2">Nairobi Branch</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Assigned Region</label>
-                        <select id="emp-region" class="form-control" required onchange="filterClientsLocally()">
-                            <option value="">Select Branch First</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label>Assigned Client / Company</label>
                         <select id="emp-client" class="form-control">
                             <option value="">Unassigned / Floating Guard</option>
@@ -468,23 +458,8 @@
                 <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--csl-dark); border-bottom: 2px solid #eee; padding-bottom: 0.3rem;">Payment Details</h4>
                 <div class="dashboard-grid">
                     <div class="form-group">
-                        <label>Payment Mode</label>
-                        <select id="emp-payment-mode" class="form-control" required onchange="updatePaymentProviderOptions()">
-                            <option value="Bank">Bank</option>
-                            <option value="Sacco">Sacco</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Provider</label>
-                        <select id="emp-provider" class="form-control" required>
-                            <option value="Equity">Equity</option>
-                            <option value="NCBA">NCBA</option>
-                            <option value="DTB Bank">DTB Bank</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Account Number</label>
-                        <input type="text" id="emp-account" class="form-control">
+                        <label>Account Number (Bank or Sacco)</label>
+                        <input type="text" id="emp-account" class="form-control" required placeholder="Enter bank account or Sacco member number">
                     </div>
                     <div class="form-group">
                         <label>Basic Salary (Ksh)</label>
@@ -536,6 +511,23 @@
                         <label>Region Details</label>
                         <select id="client-region" class="form-control" required>
                             <option value="">Select Branch First</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Mode</label>
+                        <select id="client-payment-mode" class="form-control" required onchange="updateClientPaymentProviderOptions()">
+                            <option value="Bank">Bank</option>
+                            <option value="Sacco">Sacco</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Provider</label>
+                        <select id="client-provider" class="form-control" required>
+                            <option value="Equity">Equity</option>
+                            <option value="NCBA">NCBA</option>
+                            <option value="DTB Bank">DTB Bank</option>
+                            <option value="KCB">KCB</option>
+                            <option value="Co-operative Bank">Co-operative Bank</option>
                         </select>
                     </div>
                 </div>

@@ -703,8 +703,6 @@ async function openAddEmployeeModal() {
     document.getElementById('addEmployeeForm').reset();
     document.getElementById('addEmployeeModal').style.display = 'block';
     document.getElementById('emp-submit-status').innerText = '';
-    updateRegionsDropdown();
-    updatePaymentProviderOptions();
     
     // Fetch and populate clients
     populateClientDropdown();
@@ -720,93 +718,14 @@ async function populateClientDropdown(selectedClientId = null) {
         const data = await response.json();
         if(data.status === 'success') {
             globalClientListForForm = data.data;
-            filterClientsLocally(selectedClientId);
+            globalClientListForForm.forEach(c => {
+                const regionText = c.region_name ? ` - ${c.region_name}` : '';
+                const branchText = c.section_name ? ` (${c.section_name}${regionText})` : '';
+                clientSelect.innerHTML += `<option value="${c.id}">${escapeHtml(c.company_name)}${branchText}</option>`;
+            });
+            if (selectedClientId) clientSelect.value = selectedClientId;
         }
     } catch(e) { console.error("Failed to fetch clients for dropdown", e); }
-}
-
-function filterClientsLocally(selectedClientId = null) {
-    const clientSelect = document.getElementById('emp-client');
-    const bId = document.getElementById('emp-section').value;
-    const rName = document.getElementById('emp-region').value;
-    
-    const currentVal = selectedClientId || clientSelect.value;
-    clientSelect.innerHTML = '<option value="">Unassigned / Floating Guard</option>';
-    
-    globalClientListForForm.forEach(c => {
-        if (c.branch_id == bId && c.region_name === rName) {
-            clientSelect.innerHTML += `<option value="${c.id}">${c.company_name}</option>`;
-        }
-    });
-
-    if (currentVal) clientSelect.value = currentVal;
-}
-
-function updateRegionsDropdown() {
-    const branch = document.getElementById('emp-section').value;
-    const regionSelect = document.getElementById('emp-region');
-    regionSelect.innerHTML = ''; // clear existing
-    
-    if (branch == '1') { // Mombasa
-        const options = ['Nyali', 'Mtwapa', 'Mombasa Cbd', 'Changamwe'];
-        options.forEach(opt => {
-            regionSelect.innerHTML += `<option value="${opt}">${opt}</option>`;
-        });
-    } else if (branch == '2') { // Nairobi
-        regionSelect.innerHTML += `<option value="Nairobi Cbd">Nairobi Cbd</option>`;
-    } else {
-        regionSelect.innerHTML = `<option value="">Select Branch First</option>`;
-    }
-    
-    filterClientsLocally();
-    updatePaymentProviderOptions();
-}
-
-function updatePaymentProviderOptions() {
-    const mode = document.getElementById('emp-payment-mode').value;
-    const providerSelect = document.getElementById('emp-provider');
-    const accountInput = document.getElementById('emp-account');
-    const branch = document.getElementById('emp-section').value;
-    const region = document.getElementById('emp-region').value;
-    const currentValue = providerSelect.value;
-
-    const bankOptions = ['Equity', 'NCBA', 'DTB Bank', 'KCB', 'Co-operative Bank'];
-    const saccoOptions = ['CIA TABASURI SACCO', 'IMARIKA SACCO'];
-    const saccoMapping = {
-        '1': {
-            'Nyali': 'CIA TABASURI SACCO',
-            'Mtwapa': 'CIA TABASURI SACCO',
-            'Mombasa Cbd': 'CIA TABASURI SACCO',
-            'Changamwe': 'CIA TABASURI SACCO'
-        },
-        '2': {
-            'Nairobi Cbd': 'IMARIKA SACCO'
-        }
-    };
-
-    providerSelect.innerHTML = '';
-
-    if (mode === 'Sacco') {
-        // Allow any region to pick a Sacco provider. Default to mapped provider if available.
-        providerSelect.disabled = false;
-        providerSelect.innerHTML = '';
-        saccoOptions.forEach(s => {
-            providerSelect.innerHTML += `<option value="${s}">${s}</option>`;
-        });
-        // If there's a mapping for branch+region, preselect the mapped provider, else keep first option
-        const mapped = (saccoMapping[branch] && saccoMapping[branch][region]) ? saccoMapping[branch][region] : null;
-        providerSelect.value = mapped || saccoOptions[0];
-        accountInput.required = false;
-        accountInput.placeholder = 'Optional for Sacco payments';
-    } else {
-        bankOptions.forEach(opt => {
-            providerSelect.innerHTML += `<option value="${opt}">${opt}</option>`;
-        });
-        providerSelect.disabled = false;
-        providerSelect.value = bankOptions.includes(currentValue) ? currentValue : bankOptions[0];
-        accountInput.required = true;
-        accountInput.placeholder = '';
-    }
 }
 
 function editEmployee(id) {
@@ -823,17 +742,12 @@ function editEmployee(id) {
     document.getElementById('emp-id').value = emp.id_number;
     document.getElementById('emp-phone').value = emp.phone_number || '';
     document.getElementById('emp-location').value = emp.home_location || '';
+    document.getElementById('emp-next-of-kin').value = emp.next_of_kin || '';
     document.getElementById('emp-kra').value = emp.kra_pin || '';
     document.getElementById('emp-nssf').value = emp.nssf_number || '';
     document.getElementById('emp-sha').value = emp.sha_number || '';
     document.getElementById('emp-role').value = emp.role;
-    document.getElementById('emp-section').value = emp.section_id;
-    updateRegionsDropdown();
-    document.getElementById('emp-region').value = emp.region_name || '';
     populateClientDropdown(emp.client_id);
-    document.getElementById('emp-payment-mode').value = emp.payment_mode || 'Bank';
-    updatePaymentProviderOptions();
-    document.getElementById('emp-provider').value = emp.payment_provider || emp.bank_name || 'Equity';
     document.getElementById('emp-account').value = emp.account_number || '';
     document.getElementById('emp-salary').value = emp.basic_salary;
     
@@ -860,7 +774,6 @@ async function submitEmployeeForm(e) {
     const btn = document.getElementById('submit-emp-btn');
     const statusDiv = document.getElementById('emp-submit-status');
     
-    // Gather all form data including the new Kenyan requirements
     const editId = document.getElementById('emp-edit-id').value;
     const data = {
         id: editId,
@@ -869,15 +782,12 @@ async function submitEmployeeForm(e) {
         id_number: document.getElementById('emp-id').value,
         phone_number: document.getElementById('emp-phone').value,
         home_location: document.getElementById('emp-location').value,
+        next_of_kin: document.getElementById('emp-next-of-kin').value,
         kra_pin: document.getElementById('emp-kra').value,
         nssf_number: document.getElementById('emp-nssf').value,
         sha_number: document.getElementById('emp-sha').value,
         role: document.getElementById('emp-role').value,
-        section_id: document.getElementById('emp-section').value,
-        region_name: document.getElementById('emp-region').value,
         client_id: document.getElementById('emp-client').value,
-        payment_mode: document.getElementById('emp-payment-mode').value,
-        payment_provider: document.getElementById('emp-provider').value,
         account_number: document.getElementById('emp-account').value,
         basic_salary: document.getElementById('emp-salary').value
     };
@@ -885,7 +795,6 @@ async function submitEmployeeForm(e) {
     btn.innerText = 'Saving...';
     btn.disabled = true;
     
-    // Call update API if ID exists, else call add API
     const endpoint = editId ? 'backend/api.php?action=update_employee' : 'backend/api.php?action=add_employee';
 
     try {
@@ -895,7 +804,6 @@ async function submitEmployeeForm(e) {
             body: JSON.stringify(data)
         });
         
-        // Ensure successful HTTP response before parsing JSON
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -1008,6 +916,7 @@ function openAddClientModal() {
     document.getElementById('submit-client-btn').innerText = 'Save Client';
     document.getElementById('client-submit-status').innerHTML = '';
     updateClientRegionsDropdown();
+    updateClientPaymentProviderOptions();
     document.getElementById('addClientModal').style.display = 'block';
 }
 
@@ -1032,6 +941,29 @@ function updateClientRegionsDropdown() {
     }
 }
 
+function updateClientPaymentProviderOptions() {
+    const mode = document.getElementById('client-payment-mode').value;
+    const providerSelect = document.getElementById('client-provider');
+    const currentValue = providerSelect.value;
+
+    const bankOptions = ['Equity', 'NCBA', 'DTB Bank', 'KCB', 'Co-operative Bank'];
+    const saccoOptions = ['CIA TABASURI SACCO', 'IMARIKA SACCO'];
+
+    providerSelect.innerHTML = '';
+
+    if (mode === 'Sacco') {
+        saccoOptions.forEach(s => {
+            providerSelect.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+        providerSelect.value = saccoOptions.includes(currentValue) ? currentValue : saccoOptions[0];
+    } else {
+        bankOptions.forEach(opt => {
+            providerSelect.innerHTML += `<option value="${opt}">${opt}</option>`;
+        });
+        providerSelect.value = bankOptions.includes(currentValue) ? currentValue : bankOptions[0];
+    }
+}
+
 function editClient(id) {
     const c = globalClients.find(x => x.id == id);
     if(!c) return;
@@ -1046,6 +978,9 @@ function editClient(id) {
     document.getElementById('client-section').value = c.branch_id;
     updateClientRegionsDropdown();
     document.getElementById('client-region').value = c.region_name;
+    document.getElementById('client-payment-mode').value = c.payment_mode || 'Bank';
+    updateClientPaymentProviderOptions();
+    document.getElementById('client-provider').value = c.payment_provider || 'Equity';
     
     document.getElementById('addClientModal').style.display = 'block';
 }
@@ -1062,7 +997,9 @@ async function submitClientForm(e) {
         contact_person: document.getElementById('client-contact').value,
         phone_number: document.getElementById('client-phone').value,
         branch_id: document.getElementById('client-section').value,
-        region_name: document.getElementById('client-region').value
+        region_name: document.getElementById('client-region').value,
+        payment_mode: document.getElementById('client-payment-mode').value,
+        payment_provider: document.getElementById('client-provider').value
     };
 
     btn.innerText = 'Saving...';
