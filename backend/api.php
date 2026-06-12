@@ -59,6 +59,9 @@ switch ($action) {
     case 'get_company_taxes':
         getCompanyTaxes($conn);
         break;
+    case 'debug_payroll_summary':
+        debugPayrollSummary($conn);
+        break;
     case 'add_employee':
         addEmployee($conn);
         break;
@@ -300,14 +303,18 @@ function getPayrollReport($conn) {
     if ($clientId === 'unassigned') {
         if ($hasClientId) {
             $sql .= " AND p.client_id IS NULL";
-        } else {
+        } elseif ($hasCompanyName) {
             $sql .= " AND (p.company_name IS NULL OR p.company_name = '')";
         }
     } else if ($clientId !== 'all') {
         if ($hasClientId && is_numeric($clientId)) {
             $sql .= " AND p.client_id = ?";
-        } else {
+        } elseif ($hasCompanyName) {
             $sql .= " AND p.company_name = ?";
+        } else {
+            // No reliable client/company column available; return no rows for this filtered request.
+            echo json_encode(["status" => "success", "data" => []]);
+            return;
         }
     }
 
@@ -316,7 +323,7 @@ function getPayrollReport($conn) {
         if ($clientId !== 'all' && $clientId !== 'unassigned') {
             if ($hasClientId && is_numeric($clientId)) {
                 $stmt->bind_param("si", $month, $clientId);
-            } else {
+            } elseif ($hasCompanyName) {
                 $stmt->bind_param("ss", $month, $clientId);
             }
         } else {
@@ -368,7 +375,7 @@ function getPayrollClients($conn) {
                 $clients[] = $row;
             }
         }
-    } else {
+    } elseif ($hasCompanyName) {
         $sql = "SELECT DISTINCT p.company_name FROM payroll_records p WHERE p.payroll_month = ? AND p.company_name IS NOT NULL AND p.company_name != '' ORDER BY p.company_name ASC";
         $stmt = $conn->prepare($sql);
         if($stmt) {
@@ -384,8 +391,10 @@ function getPayrollClients($conn) {
     // Also check if there are unassigned employees
     if ($hasClientId) {
         $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p WHERE p.payroll_month = ? AND p.client_id IS NULL";
-    } else {
+    } elseif ($hasCompanyName) {
         $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p WHERE p.payroll_month = ? AND (p.company_name IS NULL OR p.company_name = '')";
+    } else {
+        $sqlUnassigned = "SELECT COUNT(*) as count FROM payroll_records p WHERE p.payroll_month = ?";
     }
     $stmtU = $conn->prepare($sqlUnassigned);
     if ($stmtU) {
@@ -418,6 +427,47 @@ function getCompanyTaxes($conn) {
         echo json_encode(["status" => "error", "message" => "Database query failed."]);
     }
 }
+
+function debugPayrollSummary($conn) {
+    $month = isset($_GET['month']) ? $_GET['month'] : '';
+    if (!$month) {
+        echo json_encode(["status" => "error", "message" => "Missing month parameter."]);
+        return;
+    }
+
+    // Columns present in payroll_records
+    $cols = [];
+    $resCols = $conn->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payroll_records'");
+    if ($resCols) {
+        while($r = $resCols->fetch_assoc()) {
+            $cols[] = $r['COLUMN_NAME'];
+        }
+    }
+
+    // Count total records for month
+    $stmt = $conn->prepare("SELECT COUNT(*) as c FROM payroll_records WHERE payroll_month = ?");
+    $total = 0;
+    if ($stmt) {
+        $stmt->bind_param("s", $month);
+        $stmt->execute();
+        $total = $stmt->get_result()->fetch_assoc()['c'];
+    }
+
+    // Sample up to 5 rows
+    $sample = [];
+    $stmt2 = $conn->prepare("SELECT * FROM payroll_records WHERE payroll_month = ? LIMIT 5");
+    if ($stmt2) {
+        $stmt2->bind_param("s", $month);
+        $stmt2->execute();
+        $res = $stmt2->get_result();
+        while($r = $res->fetch_assoc()) {
+            $sample[] = $r;
+        }
+    }
+
+    echo json_encode(["status" => "success", "data" => ["columns" => $cols, "total" => intval($total), "sample" => $sample]]);
+}
+
 
 function addEmployee($conn) {
     // Read JSON POST payload
