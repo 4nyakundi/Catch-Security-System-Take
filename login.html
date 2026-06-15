@@ -60,8 +60,9 @@
     <div class="login-wrapper">
         <div class="glass-card login-card">
             <img src="img/logo.jpg" alt="Catch Security Logo" class="logo">
-            <h2>Admin Security Portal</h2>
+            <h2 id="portal-title">Admin Security Portal</h2>
             
+            <!-- Step 1 Form: Username/Password -->
             <form id="loginForm" onsubmit="handleLogin(event)">
                 <div class="form-group">
                     <label>Username</label>
@@ -73,6 +74,28 @@
                 </div>
                 <button type="submit" class="btn btn-primary" style="width: 100%;" id="login-btn">Secure Login</button>
                 <div id="login-error" style="color: red; margin-top: 1rem; text-align: center; display: none;"></div>
+            </form>
+
+            <!-- Step 2 Form: Two-Step Verification OTP -->
+            <form id="otpForm" onsubmit="handleVerifyOtp(event)" style="display: none;">
+                <p style="margin-bottom: 1.5rem; color: #555; font-size: 0.95rem;">
+                    A 6-digit security code has been sent to <strong id="admin-email-display">your email</strong>. Please enter the code below to complete authorization.
+                </p>
+                <div class="form-group mb-2">
+                    <label>Verification Code (OTP)</label>
+                    <input type="text" id="otp-code" class="form-control" placeholder="E.g. 123456" maxlength="6" pattern="\d{6}" required style="text-align: center; font-size: 1.5rem; letter-spacing: 5px; font-weight: bold;">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;" id="otp-btn">Verify & Authenticate</button>
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <a href="#" onclick="backToLogin(event)" style="color: var(--csl-green); font-weight: 600; text-decoration: none; font-size: 0.9rem;"><i class="fa-solid fa-arrow-left"></i> Back to Login</a>
+                </div>
+                <div id="otp-error" style="color: red; margin-top: 1rem; text-align: center; display: none;"></div>
+                
+                <div style="margin-top: 2rem; background: rgba(0, 96, 57, 0.05); border: 1px solid rgba(0,96,57,0.1); border-radius: 8px; padding: 1rem; text-align: left;">
+                    <p style="font-size: 11px; color: #555; line-height: 1.4; margin: 0;">
+                        <i class="fa-solid fa-circle-info" style="color: var(--csl-green);"></i> <strong>Local Environment:</strong> If your local mail server is not configured, you can retrieve the verification code from the <code style="background: #e2e8f0; padding: 2px 4px; border-radius: 3px; font-weight: bold; font-family: monospace;">otp_log.txt</code> file in your main project folder.
+                    </p>
+                </div>
             </form>
         </div>
 
@@ -87,6 +110,8 @@
     </div>
 
     <script>
+        let registeredEmail = "";
+
         async function handleLogin(e) {
             e.preventDefault();
             const user = document.getElementById('username').value;
@@ -106,6 +131,43 @@
                 
                 const result = await response.json();
                 
+                if (result.status === 'otp_sent') {
+                    registeredEmail = result.email;
+                    document.getElementById('admin-email-display').innerText = registeredEmail;
+                    document.getElementById('portal-title').innerText = "Two-Step Verification";
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('otpForm').style.display = 'block';
+                    document.getElementById('otp-code').focus();
+                } else {
+                    err.innerText = result.message;
+                    err.style.display = 'block';
+                }
+            } catch (error) {
+                err.innerText = "Server error. Is XAMPP running?";
+                err.style.display = 'block';
+            } finally {
+                btn.innerText = "Secure Login";
+            }
+        }
+
+        async function handleVerifyOtp(e) {
+            e.preventDefault();
+            const otpVal = document.getElementById('otp-code').value;
+            const btn = document.getElementById('otp-btn');
+            const err = document.getElementById('otp-error');
+
+            btn.innerText = "Verifying...";
+            err.style.display = 'none';
+
+            try {
+                const response = await fetch('backend/api.php?action=verify_otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: registeredEmail, otp_code: otpVal })
+                });
+                
+                const result = await response.json();
+                
                 if (result.status === 'success') {
                     sessionStorage.setItem('admin_auth', 'true');
                     window.location.href = 'index.html';
@@ -117,8 +179,17 @@
                 err.innerText = "Server error. Is XAMPP running?";
                 err.style.display = 'block';
             } finally {
-                btn.innerText = "Secure Login";
+                btn.innerText = "Verify & Authenticate";
             }
+        }
+
+        function backToLogin(e) {
+            e.preventDefault();
+            document.getElementById('portal-title').innerText = "Admin Security Portal";
+            document.getElementById('otpForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('otp-error').style.display = 'none';
+            document.getElementById('login-error').style.display = 'none';
         }
     </script>
 </body>

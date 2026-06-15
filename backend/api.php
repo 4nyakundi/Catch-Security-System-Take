@@ -4,6 +4,9 @@ header('Content-Type: application/json');
 
 // Convert PHP errors and exceptions into JSON responses (helps the frontend avoid non-JSON replies)
 set_error_handler(function($errno, $errstr, $errfile, $errline){
+    if (!(error_reporting() & $errno)) {
+        return false;
+    }
     http_response_code(500);
     echo json_encode(["status" => "error", "message" => "PHP Error: $errstr in $errfile on line $errline"]);
     exit;
@@ -87,7 +90,10 @@ switch ($action) {
         getDashboardStats($conn);
         break;
     case 'login':
-        adminLogin();
+        adminLogin($conn);
+        break;
+    case 'verify_otp':
+        verifyOtp($conn);
         break;
     default:
         echo json_encode(["status" => "error", "message" => "Invalid action."]);
@@ -651,7 +657,7 @@ function getDashboardStats($conn) {
     }
 }
 
-function adminLogin() {
+function adminLogin($conn) {
     $json = file_get_contents('php://input');
     $data = json_decode($json, true);
 
@@ -663,11 +669,104 @@ function adminLogin() {
     $user = trim($data['username']);
     $pass = trim($data['password']);
 
-    // Hardcoded requested admin credentials for immediate local XAMPP access
-    if (strtolower($user) === 'admin' && $pass === 'c@#365') {
-        echo json_encode(["status" => "success", "message" => "Authenticated"]);
+    $stmt = $conn->prepare("SELECT * FROM admins WHERE LOWER(username) = LOWER(?)");
+    if (!$stmt) {
+        echo json_encode(["status" => "error", "message" => "Database query failed: " . $conn->error]);
+        return;
+    }
+    $stmt->bind_param("s", $user);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $admin = $res->fetch_assoc();
+
+    if ($admin && password_verify($pass, $admin['password_hash'])) {
+        // Generate a 6-digit OTP
+        $otp = sprintf("%06d", mt_rand(100000, 999999));
+        
+        // Clean up any old OTPs for this admin
+        $stmt_del = $conn->prepare("DELETE FROM admin_otps WHERE admin_id = ?");
+        if ($stmt_del) {
+            $stmt_del->bind_param("i", $admin['id']);
+            $stmt_del->execute();
+        }
+
+        // Insert new OTP
+        $expires = date('Y-m-d H:i:s', time() + 600); // 10 minutes
+        $stmt_ins = $conn->prepare("INSERT INTO admin_otps (admin_id, otp_code, expires_at) VALUES (?, ?, ?)");
+        if ($stmt_ins) {
+            $stmt_ins->bind_param("iss", $admin['id'], $otp, $expires);
+            $stmt_ins->execute();
+        }
+
+        // Write to local otp_log.txt for local testing/development
+        $logPath = dirname(__DIR__) . '/otp_log.txt';
+        $logMessage = "[" . date('Y-m-d H:i:s') . "] OTP for " . $admin['email'] . ": " . $otp . "\n";
+        file_put_contents($logPath, $logMessage);
+
+        // Send email (suppressed in case of missing mail server)
+        $subject = "Catch Security System - Admin Login OTP Verification";
+        $message = "Hello,\n\nYour 6-digit security code for Catch Security System Admin Login is: " . $otp . "\n\nThis code will expire in 10 minutes.\n\nBest regards,\nCatch Security System Management";
+        $headers = "From: no-reply@catchsecurity.co.ke\r\nReply-To: no-reply@catchsecurity.co.ke";
+        @mail($admin['email'], $subject, $message, $headers);
+
+        echo json_encode([
+            "status" => "otp_sent", 
+            "message" => "A 6-digit verification code has been sent to your registered email address.",
+            "email" => $admin['email']
+        ]);
     } else {
         echo json_encode(["status" => "error", "message" => "Invalid username or password!"]);
+    }
+}
+
+function verifyOtp($conn) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+
+    if(!$data || !isset($data['email']) || !isset($data['otp_code'])) {
+        echo json_encode(["status" => "error", "message" => "Missing verification data."]);
+        return;
+    }
+
+    $email = trim($data['email']);
+    $otp = trim($data['otp_code']);
+
+    $stmt = $conn->prepare("SELECT * FROM admins WHERE email = ?");
+    if (!$stmt) {
+        echo json_encode(["status" => "error", "message" => "Database query failed: " . $conn->error]);
+        return;
+    }
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $admin = $stmt->get_result()->fetch_assoc();
+
+    if (!$admin) {
+        echo json_encode(["status" => "error", "message" => "Admin not found."]);
+        return;
+    }
+
+    // Verify the OTP code
+    $now = date('Y-m-d H:i:s');
+    $stmt_otp = $conn->prepare("SELECT * FROM admin_otps WHERE admin_id = ? AND otp_code = ? AND expires_at > ?");
+    if (!$stmt_otp) {
+        echo json_encode(["status" => "error", "message" => "Database query failed: " . $conn->error]);
+        return;
+    }
+    $stmt_otp->bind_param("iss", $admin['id'], $otp, $now);
+    $stmt_otp->execute();
+    $res_otp = $stmt_otp->get_result();
+
+    if ($res_otp->num_rows > 0) {
+        // Successful verification! Delete the OTP
+        $stmt_del = $conn->prepare("DELETE FROM admin_otps WHERE admin_id = ?");
+        if ($stmt_del) {
+            $stmt_del->bind_param("i", $admin['id']);
+            $stmt_del->execute();
+        }
+
+        echo json_encode(["status" => "success", "message" => "Authenticated"]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Invalid or expired verification code."]);
     }
 }
 
