@@ -95,6 +95,15 @@ switch ($action) {
     case 'verify_otp':
         verifyOtp($conn);
         break;
+    case 'import_employees':
+        importEmployees($conn);
+        break;
+    case 'import_clients':
+        importClients($conn);
+        break;
+    case 'import_excel_payroll':
+        importExcelPayroll($conn);
+        break;
     default:
         echo json_encode(["status" => "error", "message" => "Invalid action."]);
 }
@@ -894,6 +903,166 @@ function deleteEmployee($conn) {
         }
     } catch(Exception $e) {
         echo json_encode(["status" => "error", "message" => "Database Error: " . $e->getMessage()]);
+    }
+}
+
+function importEmployees($conn) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    if (!$data || !is_array($data)) {
+        echo json_encode(["status" => "error", "message" => "Invalid payload."]);
+        return;
+    }
+    
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare("INSERT INTO employees (first_name, last_name, id_number, phone_number, home_location, next_of_kin, kra_pin, nssf_number, sha_number, role, client_id, account_number, basic_salary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if (!$stmt) {
+            throw new Exception($conn->error);
+        }
+        $count = 0;
+        foreach ($data as $emp) {
+            $fname = $emp['first_name'];
+            $lname = $emp['last_name'];
+            $id_num = $emp['id_number'];
+            $phone = $emp['phone_number'] ?? '';
+            $location = $emp['home_location'] ?? '';
+            $next_of_kin = $emp['next_of_kin'] ?? '';
+            $kra = $emp['kra_pin'] ?? null;
+            $nssf = $emp['nssf_number'] ?? null;
+            $sha = $emp['sha_number'] ?? null;
+            $role = $emp['role'] ?? 'Guard';
+            $clientId = !empty($emp['client_id']) ? intval($emp['client_id']) : null;
+            $account_number = $emp['account_number'] ?? '';
+            $salary = floatval($emp['basic_salary'] ?? 0);
+
+            $stmt->bind_param("sssssssssisid", $fname, $lname, $id_num, $phone, $location, $next_of_kin, $kra, $nssf, $sha, $role, $clientId, $account_number, $salary);
+            $stmt->execute();
+            $count++;
+        }
+        $conn->commit();
+        echo json_encode(["status" => "success", "message" => "Imported $count employees successfully."]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(["status" => "error", "message" => "Failed to import employees. Error: " . $e->getMessage()]);
+    }
+}
+
+function importClients($conn) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    if (!$data || !is_array($data)) {
+        echo json_encode(["status" => "error", "message" => "Invalid payload."]);
+        return;
+    }
+    
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare("INSERT INTO clients (company_name, contact_person, phone_number, branch_id, region_name, payment_mode, payment_provider) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        if (!$stmt) {
+            throw new Exception($conn->error);
+        }
+        $count = 0;
+        foreach ($data as $c) {
+            $name = $c['company_name'];
+            $contact = $c['contact_person'] ?? '';
+            $phone = $c['phone_number'] ?? '';
+            $branch_id = intval($c['branch_id'] ?? 1);
+            $region = $c['region_name'] ?? '';
+            $mode = $c['payment_mode'] ?? 'Bank';
+            $provider = $c['payment_provider'] ?? 'Equity';
+
+            $stmt->bind_param("sssisss", $name, $contact, $phone, $branch_id, $region, $mode, $provider);
+            $stmt->execute();
+            $count++;
+        }
+        $conn->commit();
+        echo json_encode(["status" => "success", "message" => "Imported $count clients successfully."]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(["status" => "error", "message" => "Failed to import clients. Error: " . $e->getMessage()]);
+    }
+}
+
+function importExcelPayroll($conn) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    
+    if (!$data || !isset($data['month']) || !isset($data['records']) || !isset($data['admin_password'])) {
+        echo json_encode(["status" => "error", "message" => "Missing parameters."]);
+        return;
+    }
+    
+    if ($data['admin_password'] !== 'c@#365') {
+        echo json_encode(["status" => "error", "message" => "Unauthorized. Incorrect admin password."]);
+        return;
+    }
+
+    $month = $data['month'];
+    $records = $data['records'];
+
+    $conn->begin_transaction();
+    try {
+        // Clear existing records for the month
+        $stmt = $conn->prepare("DELETE FROM payroll_records WHERE payroll_month = ?");
+        $stmt->bind_param("s", $month);
+        $stmt->execute();
+
+        $stmt2 = $conn->prepare("DELETE FROM company_finances WHERE finance_month = ?");
+        $stmt2->bind_param("s", $month);
+        $stmt2->execute();
+
+        $total_employer_nssf = 0;
+        $total_employer_levy = 0;
+        $total_nita = 0;
+        $total_paye = 0;
+        $count = 0;
+
+        $stmt_ins = $conn->prepare("INSERT INTO payroll_records (employee_id, payroll_month, days_worked, basic_salary, gross_pay, nssf_deduction, sha_deduction, housing_levy, paye_tax, net_pay, payment_mode, payment_provider, branch_name, region_name, company_name, client_id, account_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if (!$stmt_ins) {
+            throw new Exception($conn->error);
+        }
+
+        foreach ($records as $r) {
+            $emp_id = intval($r['employee_id']);
+            $days = intval($r['days_worked']);
+            $basic = floatval($r['basic_salary']);
+            $gross = floatval($r['gross_pay']);
+            $nssf = floatval($r['nssf_deduction']);
+            $sha = floatval($r['sha_deduction']);
+            $levy = floatval($r['housing_levy']);
+            $paye = floatval($r['paye_tax']);
+            $net = floatval($r['net_pay']);
+            $mode = $r['payment_mode'];
+            $provider = $r['payment_provider'];
+            $branch = $r['branch_name'];
+            $region = $r['region_name'];
+            $company = $r['company_name'];
+            $client_id = !empty($r['client_id']) ? intval($r['client_id']) : null;
+            $acc_no = $r['account_number'];
+
+            $stmt_ins->bind_param("isidddddddsssssis", $emp_id, $month, $days, $basic, $gross, $nssf, $sha, $levy, $paye, $net, $mode, $provider, $branch, $region, $company, $client_id, $acc_no);
+            $stmt_ins->execute();
+
+            $total_employer_nssf += $nssf;
+            $total_employer_levy += $levy;
+            $total_nita += 50;
+            $total_paye += $paye;
+            $count++;
+        }
+
+        $stmt_comp = $conn->prepare("INSERT INTO company_finances (finance_month, total_employer_nssf, total_employer_housing_levy, total_nita, total_paye_remitted) VALUES (?, ?, ?, ?, ?)");
+        if (!$stmt_comp) {
+            throw new Exception($conn->error);
+        }
+        $stmt_comp->bind_param("sdddd", $month, $total_employer_nssf, $total_employer_levy, $total_nita, $total_paye);
+        $stmt_comp->execute();
+
+        $conn->commit();
+        echo json_encode(["status" => "success", "count" => $count]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(["status" => "error", "message" => "Database sync transaction failed: " . $e->getMessage()]);
     }
 }
 

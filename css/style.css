@@ -262,3 +262,41 @@ th {
     color: var(--csl-green);
     text-decoration: none;
 }
+
+/* Styles applied only during PDF export */
+#report-content.pdf-mode {
+    width: 1056px !important;
+    min-width: 1056px !important;
+    background: #ffffff !important;
+    padding: 10px !important;
+}
+#report-content.pdf-mode img {
+    height: 50px !important;
+}
+#report-content.pdf-mode h2 {
+    font-size: 14px !important;
+}
+#report-content.pdf-mode p {
+    font-size: 8px !important;
+    margin: 0.1rem 0 !important;
+}
+#report-content.pdf-mode table {
+    width: 100% !important;
+    font-size: 5.5px !important;
+    border-collapse: collapse !important;
+}
+#report-content.pdf-mode th, #report-content.pdf-mode td {
+    padding: 3px 1px !important;
+    font-size: 5.5px !important;
+    white-space: nowrap !important;
+}
+#report-content.pdf-mode th:nth-child(2), #report-content.pdf-mode td:nth-child(2),
+#report-content.pdf-mode th:nth-child(6), #report-content.pdf-mode td:nth-child(6),
+#report-content.pdf-mode th:nth-child(7), #report-content.pdf-mode td:nth-child(7) {
+    white-space: normal !important;
+    word-break: normal !important;
+}
+#report-content.pdf-mode #payroll-sacco-summary {
+    display: none !important;
+}
+

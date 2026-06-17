@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Payroll System - Catch Security Links</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=11">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Include SheetJS for Excel Export -->
@@ -130,8 +130,11 @@
             <div class="glass-card mb-2">
                 <div class="flex justify-between align-center mb-1">
                     <h2 class="text-green">Employee Management</h2>
-                    <button class="btn btn-primary" onclick="openAddEmployeeModal()"><i class="fa-solid fa-plus"></i>
-                        Add Employee</button>
+                    <div class="flex gap-1">
+                        <button class="btn btn-primary" onclick="openAddEmployeeModal()"><i class="fa-solid fa-plus"></i> Add Employee</button>
+                        <button class="btn btn-accent" onclick="document.getElementById('employee-excel-import').click()"><i class="fa-solid fa-file-import"></i> Import Excel</button>
+                        <input type="file" id="employee-excel-import" style="display:none;" accept=".xlsx,.xls" onchange="importEmployeesFromExcel(event)">
+                    </div>
                 </div>
                 <!-- Region Filtering Buttons -->
                 <div
@@ -173,7 +176,11 @@
             <div class="glass-card mb-2">
                 <div class="flex justify-between align-center mb-1">
                     <h2 class="text-green">Contracted Companies & Clients</h2>
-                    <button class="btn btn-primary" onclick="openAddClientModal()"><i class="fa-solid fa-building"></i> Add Client</button>
+                    <div class="flex gap-1">
+                        <button class="btn btn-primary" onclick="openAddClientModal()"><i class="fa-solid fa-building"></i> Add Client</button>
+                        <button class="btn btn-accent" onclick="document.getElementById('client-excel-import').click()"><i class="fa-solid fa-file-import"></i> Import Excel</button>
+                        <input type="file" id="client-excel-import" style="display:none;" accept=".xlsx,.xls" onchange="importClientsFromExcel(event)">
+                    </div>
                 </div>
                 <div class="table-container">
                     <table id="clients-table">
@@ -302,11 +309,13 @@
                         <div class="gap-1 flex">
                             <button class="btn btn-primary" onclick="exportToPDF()"><i class="fa-solid fa-file-pdf"></i> Export PDF</button>
                             <button class="btn btn-accent" onclick="exportToExcel()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
+                            <button class="btn" style="background:#006039; color:white;" onclick="document.getElementById('payroll-excel-import').click()"><i class="fa-solid fa-cloud-arrow-up"></i> Sync Excel</button>
+                            <input type="file" id="payroll-excel-import" style="display:none;" accept=".xlsx,.xls" onchange="promptPayrollImportPassword(event)">
                         </div>
                     </div>
 
                     <div id="report-content" class="table-container" style="background: white; padding: 0.5rem; display: none;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 0.5rem; border-bottom: 2px solid var(--csl-dark); padding-bottom: 0.5rem;">
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin-bottom: 0.5rem; border-bottom: 2px solid var(--csl-dark); padding-bottom: 0.5rem; text-align: center;">
                         <img src="img/logo.jpg" alt="Logo" style="height: 80px; border-radius: 8px;">
                         <div style="text-align: center;">
                             <h2 style="color: var(--csl-green); margin: 0; font-size: 20px; font-weight: bold;">CATCH SECURITY LINKS LIMITED</h2>
@@ -345,6 +354,7 @@
                     <table id="payroll-report-table" style="font-size: 11px; white-space: nowrap;">
                         <thead id="payroll-report-head">
                             <tr>
+                                <th>No.</th>
                                 <th>Emp Name</th>
                                 <th>ID No</th>
                                 <th>Phone</th>
@@ -561,7 +571,7 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=7"></script>
+    <script src="js/app.js?v=11"></script>
 </body>
 
 </html>

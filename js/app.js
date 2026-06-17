@@ -419,7 +419,7 @@ async function toggleMonthFolder(month, el) {
 // Fetch Payroll Data for Reports
 async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guards') {
     const list = document.getElementById('payroll-report-list');
-    list.innerHTML = '<tr><td colspan="22" style="text-align:center;">Loading records...</td></tr>';
+    list.innerHTML = '<tr><td colspan="23" style="text-align:center;">Loading records...</td></tr>';
 
     document.getElementById('report-content').style.display = 'block';
     document.getElementById('report-title-display').innerText = (clientId === 'summary_only') ? `Payroll Summary: ${month}` : `Payroll Report: ${month} - ${clientName}`;
@@ -446,7 +446,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
         if (!response.ok) {
             const raw = await response.text();
             console.error('Failed to fetch payroll report', response.status, raw);
-            list.innerHTML = `<tr><td colspan="22" style="text-align:center; color:red;">Error loading payroll report: ${response.status} ${response.statusText}. See console for details.</td></tr>`;
+            list.innerHTML = `<tr><td colspan="23" style="text-align:center; color:red;">Error loading payroll report: ${response.status} ${response.statusText}. See console for details.</td></tr>`;
             return;
         }
 
@@ -456,7 +456,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
         } catch (parseErr) {
             const raw = await response.text();
             console.error('Invalid JSON for payroll report:', raw);
-            list.innerHTML = `<tr><td colspan="22" style="text-align:center; color:red;">Invalid server response. Check console for details.</td></tr>`;
+            list.innerHTML = `<tr><td colspan="23" style="text-align:center; color:red;">Invalid server response. Check console for details.</td></tr>`;
             return;
         }
 
@@ -469,7 +469,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
         let companyMap = {};
         list.innerHTML = '';
         if (data.status === 'success' && data.data.length > 0) {
-            data.data.forEach(p => {
+            data.data.forEach((p, idx) => {
                 const isOldRecord = parseFloat(p.basic_salary || 0) === 0;
                 const daysDisplay = isOldRecord ? '' : (p.days_worked || 30);
                 const basicDisplay = isOldRecord ? '' : parseFloat(p.basic_salary).toLocaleString(undefined, { minimumFractionDigits: 2 });
@@ -511,6 +511,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
 
                 list.innerHTML += `
                     <tr>
+                        <td>${idx + 1}</td>
                         <td>${p.first_name} ${p.last_name}</td>
                         <td>${p.id_number || 'N/A'}</td>
                         <td>${p.phone_number || 'N/A'}</td>
@@ -561,7 +562,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
             document.getElementById('sacco-summary-count').innerText = `${saccoCount} Sacco payment(s)`;
             document.getElementById('sacco-summary-total').innerText = `Total Net: Ksh ${saccoTotalNet.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         } else {
-            list.innerHTML = '<tr><td colspan="22" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
+            list.innerHTML = '<tr><td colspan="23" style="text-align:center;">No payroll records found for this month. Please Run Payroll first.</td></tr>';
             document.getElementById('tabasuri-sacco-list').innerHTML = '<span style="color:#64748b;">No CIA TABASURI SACCO payments in this report.</span>';
             document.getElementById('imarika-sacco-list').innerHTML = '<span style="color:#64748b;">No IMARIKA SACCO payments in this report.</span>';
             document.getElementById('bank-summary-count').innerText = '0 Bank payment(s)';
@@ -570,7 +571,7 @@ async function loadPayrollReport(month, clientId = 'all', clientName = 'All Guar
             document.getElementById('sacco-summary-total').innerText = 'Total Net: Ksh 0.00';
         }
     } catch (e) {
-        list.innerHTML = '<tr><td colspan="22" style="text-align:center; color:red;">Backend connection failed.</td></tr>';
+        list.innerHTML = '<tr><td colspan="23" style="text-align:center; color:red;">Backend connection failed.</td></tr>';
         document.getElementById('tabasuri-sacco-list').innerHTML = '<span style="color:#64748b;">No CIA TABASURI SACCO payments in this report.</span>';
         document.getElementById('imarika-sacco-list').innerHTML = '<span style="color:#64748b;">No IMARIKA SACCO payments in this report.</span>';
     }
@@ -606,144 +607,284 @@ function exportToExcel() {
     const table = document.getElementById("payroll-report-table");
     if (!table) return;
 
-    // Get headers
-    const headers = [];
-    table.querySelectorAll("thead th").forEach(th => {
-        headers.push(th.innerText);
-    });
+    // Helper functions for Excel column indexing
+    function getColLetter(index) {
+        let letter = "";
+        while (index >= 0) {
+            letter = String.fromCharCode((index % 26) + 65) + letter;
+            index = Math.floor(index / 26) - 1;
+        }
+        return letter;
+    }
 
-    // Get rows
-    const dataRows = [];
+    function getColIndex(colLetter) {
+        let colIndex = 0;
+        for (let i = 0; i < colLetter.length; i++) {
+            colIndex = colIndex * 26 + (colLetter.charCodeAt(i) - 64);
+        }
+        return colIndex - 1; // 0-indexed
+    }
+
+    // Get report title
+    const reportTitle = document.getElementById('report-title-display').innerText.trim();
+
+    // Parse all table row data
+    const rows = [];
     table.querySelectorAll("tbody tr").forEach(tr => {
         const tds = tr.querySelectorAll("td");
         if (tds.length < 10) return; // Skip message/empty rows
 
-        const rowData = [];
-        tds.forEach((td, colIndex) => {
-            const val = td.innerText.trim();
-            // Columns 12 to 21 are numeric (Days, Gross, Taxes, Net, Deductions)
-            if (colIndex >= 12 && colIndex <= 21) {
-                const cleanVal = val.replace(/,/g, '');
-                if (cleanVal !== '' && !isNaN(cleanVal) && isFinite(cleanVal)) {
-                    rowData.push(Number(cleanVal));
+        const parseNum = (val) => {
+            const clean = val.replace(/,/g, '').trim();
+            return (clean !== '' && !isNaN(clean) && isFinite(clean)) ? Number(clean) : 0;
+        };
+
+        const rowData = {
+            name: tds[1].innerText.trim(),
+            id: tds[2].innerText.trim(),
+            phone: tds[3].innerText.trim(),
+            payment_mode: tds[4].innerText.trim(),
+            provider: tds[5].innerText.trim(),
+            company: tds[6].innerText.trim(),
+            branch: tds[7].innerText.trim(),
+            acc_no: tds[8].innerText.trim(),
+            sha_no: tds[9].innerText.trim(),
+            nssf_no: tds[10].innerText.trim(),
+            kra_pin: tds[11].innerText.trim(),
+            role: tds[12].innerText.trim(),
+            days: parseNum(tds[13].innerText),
+            basic_salary: parseNum(tds[14].innerText),
+            gross: parseNum(tds[15].innerText),
+            paye: parseNum(tds[16].innerText),
+            sha: parseNum(tds[17].innerText),
+            nssf: parseNum(tds[18].innerText),
+            unif: parseNum(tds[19].innerText),
+            housing_levy: parseNum(tds[20].innerText),
+            total_deductions: parseNum(tds[21].innerText),
+            net_pay: parseNum(tds[22].innerText)
+        };
+        rows.push(rowData);
+    });
+
+    // Categorize rows
+    const payrollReportRows = [];
+    const wsRows = [];
+    const bpRows = [];
+
+    rows.forEach(p => {
+        const isImarika = String(p.provider).toUpperCase().includes('IMARIKA');
+        const isTabasuri = String(p.provider).toUpperCase().includes('TABASURI');
+        
+        const branchUpper = String(p.branch).toUpperCase();
+        const isNairobi = branchUpper.includes('NAIROBI');
+
+        if (p.payment_mode === 'Bank') {
+            payrollReportRows.push(p);
+        } else if (p.payment_mode === 'Sacco') {
+            if (isImarika) {
+                bpRows.push(p);
+            } else if (isTabasuri) {
+                if (isNairobi) {
+                    payrollReportRows.push(p);
                 } else {
-                    rowData.push(0);
+                    wsRows.push(p);
                 }
             } else {
-                rowData.push(val);
+                // Fallback for other Saccos
+                payrollReportRows.push(p);
             }
-        });
-        if (rowData.length > 0) {
-            dataRows.push(rowData);
+        } else {
+            // Fallback for other modes
+            payrollReportRows.push(p);
         }
     });
 
-    const reportTitle = document.getElementById('report-title-display').innerText;
-
-    // Calculate dynamic formulas for totals
-    const startRow = 9;
-    const endRow = 8 + dataRows.length;
-
-    const totalsRow = [];
-    for (let i = 0; i < headers.length; i++) {
-        if (i === 0) {
-            totalsRow.push("TOTAL");
-        } else if (i >= 13 && i <= 21) {
-            const colLetter = String.fromCharCode(65 + i); // 65 is 'A'
-            totalsRow.push({
-                t: 'n',
-                f: `SUM(${colLetter}${startRow}:${colLetter}${endRow})`,
-                z: '#,##0.00'
-            });
-        } else if (i === 12) {
-            const colLetter = String.fromCharCode(65 + i);
-            totalsRow.push({
-                t: 'n',
-                f: `SUM(${colLetter}${startRow}:${colLetter}${endRow})`,
-                z: '0'
-            });
-        } else {
-            totalsRow.push("");
-        }
-    }
-
-    // Construct 2D array with letterhead header and verification footer
-    const excelData = [
-        ["CATCH SECURITY LINKS LIMITED"],
-        [],
-        [reportTitle],
-        [],
-        headers,
-        ...dataRows,
-        totalsRow,
-        [],
-        [],
-        ["Prepared By: ___________________________", "", "", "", "", "", "Signature: ___________________________"],
-        ["Date:        ___________________________", "", "", "", "", "", "Date:        ___________________________"]
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(excelData);
+    // Create a new workbook
     const wb = XLSX.utils.book_new();
 
-    // Set letterhead merges
-    ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 21 } }, // Row 1, Cols A-V
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 21 } }, // Row 2, Cols A-V
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 21 } }, // Row 3, Cols A-V
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 21 } }, // Row 4, Cols A-V
-        { s: { r: 5, c: 0 }, e: { r: 5, c: 21 } }  // Row 6, Cols A-V
-    ];
-
-    // Auto-fit column widths (calculate max char length excluding the letterhead rows)
-    const colWidths = headers.map((header, colIndex) => {
-        let maxLen = header.length;
-        dataRows.forEach(row => {
-            const cellVal = row[colIndex];
-            if (cellVal !== null && cellVal !== undefined) {
-                let str = String(cellVal);
-                if (typeof cellVal === 'number') {
-                    str = cellVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                }
-                if (str.length > maxLen) {
-                    maxLen = str.length;
-                }
+    // Helper to generate a sheet
+    function generateWorksheet(sheetDataRows, headers, sheetType) {
+        // Map data rows to 2D array representation
+        const dataRowsArray = sheetDataRows.map((p, index) => {
+            if (sheetType === 'main') {
+                return [
+                    index + 1,
+                    p.name,
+                    p.id,
+                    p.acc_no,
+                    p.sha_no,
+                    p.nssf_no,
+                    p.kra_pin,
+                    p.role,
+                    p.days,
+                    p.basic_salary,
+                    p.gross,
+                    p.paye,
+                    p.sha,
+                    p.nssf,
+                    p.unif,
+                    p.housing_levy,
+                    p.total_deductions,
+                    p.net_pay,
+                    p.phone
+                ];
+            } else { // WS or BP
+                return [
+                    index + 1,
+                    p.name,
+                    p.id,
+                    p.acc_no,
+                    p.net_pay
+                ];
             }
         });
-        return { wch: Math.max(maxLen + 4, 10) }; // ensure min width of 10
-    });
-    ws['!cols'] = colWidths;
 
-    // Apply explicit formats to cell data
-    for (let key in ws) {
-        if (key[0] === '!') continue;
-        const cell = ws[key];
-        if (cell.t === 'n') {
-            const rowMatch = key.match(/\d+/);
-            const colMatch = key.match(/[A-Z]+/);
-            if (rowMatch && colMatch) {
-                const rowNum = parseInt(rowMatch[0]);
-                const colLetter = colMatch[0];
+        // Compute SUM formula rows
+        const startRow = 5; // Rows are 1-indexed. Data starts on Row 5 (index 4 of array)
+        const endRow = 4 + dataRowsArray.length;
+        const totalsRow = [];
 
-                // Convert column letter to index
-                let colIndex = 0;
-                for (let i = 0; i < colLetter.length; i++) {
-                    colIndex = colIndex * 26 + (colLetter.charCodeAt(i) - 64);
+        for (let i = 0; i < headers.length; i++) {
+            if (i === 0) {
+                totalsRow.push("TOTAL");
+            } else if (sheetType === 'main') {
+                if (i >= 9 && i <= 17) {
+                    const colLetter = getColLetter(i);
+                    totalsRow.push({
+                        t: 'n',
+                        f: `SUM(${colLetter}${startRow}:${colLetter}${endRow})`,
+                        z: '#,##0.00'
+                    });
+                } else if (i === 8) {
+                    const colLetter = getColLetter(i);
+                    totalsRow.push({
+                        t: 'n',
+                        f: `SUM(${colLetter}${startRow}:${colLetter}${endRow})`,
+                        z: '0'
+                    });
+                } else {
+                    totalsRow.push("");
                 }
-                colIndex -= 1; // 0-indexed
+            } else { // WS or BP
+                if (i === 4) {
+                    const colLetter = getColLetter(i);
+                    totalsRow.push({
+                        t: 'n',
+                        f: `SUM(${colLetter}${startRow}:${colLetter}${endRow})`,
+                        z: '#,##0.00'
+                    });
+                } else {
+                    totalsRow.push("");
+                }
+            }
+        }
 
-                // Limit number formatting to table body + totals row (Excel Rows 9 to 9 + dataRows.length)
-                if (rowNum >= 9 && rowNum <= 9 + dataRows.length) {
-                    if (colIndex >= 13 && colIndex <= 21) {
-                        cell.z = '#,##0.00';
-                    } else if (colIndex === 12) {
-                        cell.z = '0';
+        // Construct excelData 2D array
+        const signatureColIndex = sheetType === 'main' ? 17 : 4;
+        const prepSigRow = ["Prepared By: ___________________________"];
+        const dateSigRow = ["Date:        ___________________________"];
+        
+        for (let i = 1; i < signatureColIndex; i++) {
+            prepSigRow.push("");
+            dateSigRow.push("");
+        }
+        prepSigRow.push("Signature: ___________________________");
+        dateSigRow.push("Date:        ___________________________");
+
+        const excelData = [
+            ["CATCH SECURITY LINKS LIMITED"],
+            [reportTitle],
+            [],
+            headers,
+            ...dataRowsArray,
+            totalsRow,
+            [],
+            [],
+            prepSigRow,
+            dateSigRow
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+
+        // Set banner merges
+        const numCols = headers.length;
+        ws['!merges'] = [
+            { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }, // Row 1 banner
+            { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } }  // Row 2 banner
+        ];
+
+        // Auto-fit column widths
+        const colWidths = headers.map((header, colIndex) => {
+            let maxLen = header.length;
+            dataRowsArray.forEach(row => {
+                const cellVal = row[colIndex];
+                if (cellVal !== null && cellVal !== undefined) {
+                    let str = String(cellVal);
+                    if (typeof cellVal === 'number') {
+                        str = cellVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    }
+                    if (str.length > maxLen) {
+                        maxLen = str.length;
+                    }
+                }
+            });
+            return { wch: Math.max(maxLen + 4, 10) };
+        });
+        ws['!cols'] = colWidths;
+
+        // Apply cell numbers and formats
+        for (let key in ws) {
+            if (key[0] === '!') continue;
+            const cell = ws[key];
+            if (cell.t === 'n') {
+                const rowMatch = key.match(/\d+/);
+                const colMatch = key.match(/[A-Z]+/);
+                if (rowMatch && colMatch) {
+                    const rowNum = parseInt(rowMatch[0]);
+                    const colLetter = colMatch[0];
+                    const colIndex = getColIndex(colLetter);
+
+                    if (rowNum >= startRow && rowNum <= endRow + 1) {
+                        if (sheetType === 'main') {
+                            if (colIndex >= 9 && colIndex <= 17) {
+                                cell.z = '#,##0.00';
+                            } else if (colIndex === 8) {
+                                cell.z = '0';
+                            }
+                        } else {
+                            if (colIndex === 4) {
+                                cell.z = '#,##0.00';
+                            }
+                        }
                     }
                 }
             }
         }
+
+        return ws;
     }
 
-    XLSX.utils.book_append_sheet(wb, ws, "Payroll Report");
+    // Sheet 1: Payroll Report Headers & Worksheet
+    const mainHeaders = [
+        "S/No", "Name", "ID No", "Account No", "SHA No", 
+        "NSSF No", "KRA PIN", "Role", "Days Worked", "Basic Salary", 
+        "Gross Pay", "PAYE", "SHA", "NSSF", "UNIF", 
+        "Housing Levy", "Total Deductions", "Net Pay", "Phone"
+    ];
+    const mainWS = generateWorksheet(payrollReportRows, mainHeaders, 'main');
+    XLSX.utils.book_append_sheet(wb, mainWS, "Payroll Report");
+
+    // Sheet 2: WS Headers & Worksheet
+    const wsHeaders = ["S/No", "Name", "ID No", "Account No", "Amount"];
+    const wsWS = generateWorksheet(wsRows, wsHeaders, 'ws');
+    XLSX.utils.book_append_sheet(wb, wsWS, "WS");
+
+    // Sheet 3: BP Headers & Worksheet
+    const bpHeaders = ["S/No", "Name", "ID No", "Account No", "Amount"];
+    const bpWS = generateWorksheet(bpRows, bpHeaders, 'bp');
+    XLSX.utils.book_append_sheet(wb, bpWS, "BP");
+
+    // Save output workbook
     XLSX.writeFile(wb, "Catch_Security_Payroll_Report.xlsx");
 }
 
@@ -760,22 +901,40 @@ function exportToPDF() {
         companyBreakdown.style.display = 'none';
     }
 
+    // Get the scroll container parent
+    const parent = element.parentElement;
+    const originalParentOverflow = parent.style.overflow;
+    const originalParentOverflowX = parent.style.overflowX;
+    const originalParentWidth = parent.style.width;
+
+    // Temporarily disable clipping and overflow on the parent
+    parent.style.overflow = 'visible';
+    parent.style.overflowX = 'visible';
+    parent.style.width = 'auto';
+
     // Temporarily remove overflow constraints so html2canvas doesn't clip the table
+    element.classList.add('pdf-mode');
     element.classList.remove('table-container');
     element.style.overflow = 'visible';
 
     const opt = {
-        margin: [0.15, 0.2], // [top/bottom, left/right] in inches
+        margin: [0.15, 0.1], // [top/bottom, left/right] in inches
         filename: 'Catch_Security_Payroll_Report.pdf',
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true }, // useCORS prevents external logos from vanishing
+        html2canvas: { scale: 2, useCORS: true, scrollX: 0, scrollY: 0 }, // useCORS prevents external logos from vanishing
         jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape' }
     };
 
     html2pdf().set(opt).from(element).save().then(() => {
         // Restore properties after export
+        element.classList.remove('pdf-mode');
         element.classList.add('table-container');
         element.style.overflow = '';
+
+        // Restore parent styles
+        parent.style.overflow = originalParentOverflow;
+        parent.style.overflowX = originalParentOverflowX;
+        parent.style.width = originalParentWidth;
 
         // Restore company breakdown display
         if (companyBreakdown) {
@@ -1152,6 +1311,11 @@ async function submitAdminAuth() {
     btn.disabled = true;
     errorDiv.style.display = 'none';
 
+    if (type === 'import_payroll') {
+        syncPayrollFromExcel(window.pendingImportFile, password, btn, errorDiv);
+        return;
+    }
+
     const endpoint = type === 'employee' ? 'backend/api.php?action=delete_employee' : 'backend/api.php?action=delete_client';
 
     try {
@@ -1178,4 +1342,339 @@ async function submitAdminAuth() {
         btn.innerText = "Verify & Delete";
         btn.disabled = false;
     }
+}
+
+// ==========================================
+// EXCEL IMPORTS & SYNCHRONIZATION ENGINE
+// ==========================================
+
+async function importEmployeesFromExcel(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+            if (jsonData.length === 0) {
+                alert("The selected Excel sheet has no records.");
+                return;
+            }
+
+            const employeeData = [];
+            
+            // Fetch client mappings
+            const clientResponse = await fetch('backend/api.php?action=get_clients');
+            const clientResult = await clientResponse.json();
+            const clients = clientResult.status === 'success' ? clientResult.data : [];
+
+            jsonData.forEach(row => {
+                let client_id = null;
+                const companyCol = row["Assigned Client"] || row["Company"] || row["Client"] || row["company_name"];
+                if (companyCol) {
+                    const match = clients.find(c => String(c.company_name).toLowerCase().trim() === String(companyCol).toLowerCase().trim());
+                    if (match) client_id = match.id;
+                }
+
+                employeeData.push({
+                    first_name: row["First Name"] || row["first_name"] || row["Name"] || "",
+                    last_name: row["Last Name"] || row["last_name"] || "",
+                    id_number: String(row["ID Number"] || row["id_number"] || row["ID"] || ""),
+                    phone_number: String(row["Phone Number"] || row["phone_number"] || row["Phone"] || ""),
+                    home_location: row["Home Location"] || row["home_location"] || row["Location"] || "",
+                    next_of_kin: row["Next of Kin"] || row["next_of_kin"] || "",
+                    kra_pin: row["KRA PIN"] || row["kra_pin"] || row["KRA"] || "",
+                    nssf_number: String(row["NSSF Number"] || row["nssf_number"] || row["NSSF"] || ""),
+                    sha_number: String(row["SHA Number"] || row["sha_number"] || row["SHA"] || ""),
+                    role: row["Role"] || row["role"] || "Guard",
+                    client_id: client_id,
+                    account_number: String(row["Account Number"] || row["account_number"] || row["Acc No"] || ""),
+                    basic_salary: parseFloat(row["Basic Salary"] || row["basic_salary"] || row["Salary"] || 0)
+                });
+            });
+
+            const response = await fetch('backend/api.php?action=import_employees', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(employeeData)
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                alert(result.message);
+                loadEmployees();
+            } else {
+                alert("Import failed: " + result.message);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error parsing Excel file. Make sure columns match standard template.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = ''; // Reset uploader input
+}
+
+async function importClientsFromExcel(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+            if (jsonData.length === 0) {
+                alert("The selected Excel sheet has no records.");
+                return;
+            }
+
+            const clientData = [];
+            jsonData.forEach(row => {
+                let branch_id = 1;
+                const branchCol = String(row["Branch"] || row["Branch Assignment"] || "").toUpperCase();
+                if (branchCol.includes("NAIROBI") || branchCol === "2") {
+                    branch_id = 2;
+                }
+
+                clientData.push({
+                    company_name: row["Company Name"] || row["Company"] || row["Client Name"] || "",
+                    contact_person: row["Contact Person"] || row["Contact"] || "",
+                    phone_number: String(row["Phone Number"] || row["phone_number"] || row["Phone"] || ""),
+                    branch_id: branch_id,
+                    region_name: row["Region"] || row["Region Details"] || "",
+                    payment_mode: row["Payment Mode"] || "Bank",
+                    payment_provider: row["Payment Provider"] || row["Provider"] || "Equity"
+                });
+            });
+
+            const response = await fetch('backend/api.php?action=import_clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(clientData)
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                alert(result.message);
+                loadClients();
+            } else {
+                alert("Import failed: " + result.message);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error parsing Excel file. Make sure columns match standard template.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = ''; // Reset uploader input
+}
+
+function promptPayrollImportPassword(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    window.pendingImportFile = file;
+    event.target.value = ''; // Reset input
+
+    // Open Admin authorization modal
+    document.getElementById('pending-delete-type').value = 'import_payroll';
+    document.getElementById('pending-delete-id').value = '';
+    document.getElementById('admin-auth-password').value = '';
+    document.getElementById('admin-auth-error').style.display = 'none';
+    document.getElementById('admin-auth-btn').innerText = 'Verify & Sync';
+    document.getElementById('adminAuthModal').style.display = 'block';
+}
+
+function syncPayrollFromExcel(file, password, modalBtn, modalErrorDiv) {
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            const mainSheetName = workbook.SheetNames[0];
+            const mainSheet = workbook.Sheets[mainSheetName];
+            const a2Val = mainSheet['A2'] ? mainSheet['A2'].v : "";
+            
+            const monthMatch = String(a2Val).match(/\b\d{4}-\d{2}\b/);
+            if (!monthMatch) {
+                modalErrorDiv.innerText = "Error: Could not determine YYYY-MM month from Excel cell A2.";
+                modalErrorDiv.style.display = 'block';
+                modalBtn.innerText = 'Verify & Sync';
+                modalBtn.disabled = false;
+                return;
+            }
+            const month = monthMatch[0];
+
+            // Fetch employees for ID validation and client references mapping
+            const empResponse = await fetch('backend/api.php?action=get_employees');
+            const empResult = await empResponse.json();
+            const employees = empResult.status === 'success' ? empResult.data : [];
+
+            if (employees.length === 0) {
+                modalErrorDiv.innerText = "Error: System employees directory is empty.";
+                modalErrorDiv.style.display = 'block';
+                modalBtn.innerText = 'Verify & Sync';
+                modalBtn.disabled = false;
+                return;
+            }
+
+            const records = [];
+
+            function parseSheet(sheetName, isMainSheet) {
+                const sheet = workbook.Sheets[sheetName];
+                if (!sheet) return;
+
+                const rowsAoa = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                
+                for (let r = 4; r < rowsAoa.length; r++) {
+                    const row = rowsAoa[r];
+                    if (!row || row.length === 0) continue;
+                    
+                    const firstCellVal = String(row[0]).trim();
+                    if (firstCellVal.toUpperCase() === "TOTAL" || firstCellVal === "" || row[1] === undefined) {
+                        break; 
+                    }
+
+                    let name, id_number, acc_no, net_pay;
+                    let days_worked, basic_salary, gross_pay, nssf_deduction, sha_deduction, housing_levy, paye_tax, unif;
+
+                    if (isMainSheet) {
+                        name = row[1];
+                        id_number = String(row[2]).trim();
+                        acc_no = String(row[3]).trim();
+                        days_worked = Number(row[8]) || 30;
+                        basic_salary = Number(row[9]) || 0;
+                        gross_pay = Number(row[10]) || 0;
+                        paye_tax = Number(row[11]) || 0;
+                        sha_deduction = Number(row[12]) || 0;
+                        nssf_deduction = Number(row[13]) || 0;
+                        unif = Number(row[14]) || 0;
+                        housing_levy = Number(row[15]) || 0;
+                        net_pay = Number(row[17]) || 0;
+                    } else {
+                        name = row[1];
+                        id_number = String(row[2]).trim();
+                        acc_no = String(row[3]).trim();
+                        net_pay = Number(row[4]) || 0;
+                    }
+
+                    const emp = employees.find(e => String(e.id_number).trim() === id_number);
+                    if (!emp) {
+                        console.warn(`Guard ${name} (ID: ${id_number}) not matched in DB.`);
+                        continue;
+                    }
+
+                    if (!isMainSheet) {
+                        basic_salary = parseFloat(emp.basic_salary) || 0;
+                        const payment_mode = emp.payment_mode || 'Bank';
+                        const payment_provider = emp.payment_provider || 'Equity';
+
+                        const mockEmp = {
+                            basic_salary: basic_salary,
+                            days: 30,
+                            payment_mode: payment_mode,
+                            payment_provider: payment_provider,
+                            account_number: acc_no
+                        };
+                        const fullMonthResult = calculatePayrollTaxes(mockEmp);
+                        const expectedNet = fullMonthResult.net;
+
+                        if (expectedNet > 0 && net_pay !== expectedNet) {
+                            days_worked = Math.round(30 * (net_pay / expectedNet));
+                            days_worked = Math.max(0, Math.min(31, days_worked));
+                        } else {
+                            days_worked = 30;
+                        }
+
+                        const calcResult = calculatePayrollTaxes({
+                            basic_salary: basic_salary,
+                            days: days_worked,
+                            payment_mode: payment_mode,
+                            payment_provider: payment_provider,
+                            account_number: acc_no
+                        });
+
+                        gross_pay = calcResult.gross;
+                        nssf_deduction = calcResult.nssf;
+                        sha_deduction = calcResult.sha;
+                        housing_levy = calcResult.levy;
+                        paye_tax = calcResult.paye;
+                        unif = calcResult.unif;
+                    }
+
+                    records.push({
+                        employee_id: emp.id,
+                        days_worked: days_worked,
+                        basic_salary: basic_salary,
+                        gross_pay: gross_pay,
+                        nssf_deduction: nssf_deduction,
+                        sha_deduction: sha_deduction,
+                        housing_levy: housing_levy,
+                        paye_tax: paye_tax,
+                        net_pay: net_pay,
+                        payment_mode: emp.payment_mode,
+                        payment_provider: emp.payment_provider,
+                        branch_name: emp.section_name,
+                        region_name: emp.region_name,
+                        company_name: emp.company_name,
+                        client_id: emp.client_id,
+                        account_number: acc_no
+                    });
+                }
+            }
+
+            parseSheet(workbook.SheetNames[0], true);  
+            parseSheet(workbook.SheetNames[1], false); 
+            parseSheet(workbook.SheetNames[2], false); 
+
+            if (records.length === 0) {
+                modalErrorDiv.innerText = "Error: Found 0 matching employee rows in the sheets.";
+                modalErrorDiv.style.display = 'block';
+                modalBtn.innerText = 'Verify & Sync';
+                modalBtn.disabled = false;
+                return;
+            }
+
+            const syncResponse = await fetch('backend/api.php?action=import_excel_payroll', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    month: month,
+                    records: records,
+                    admin_password: password
+                })
+            });
+            const syncResult = await syncResponse.json();
+
+            if (syncResult.status === 'success') {
+                closeAdminAuthModal();
+                alert(`Successfully synchronized ${syncResult.count} payroll records for ${month}.`);
+                loadPayrollArchives();
+                loadDashboard();
+            } else {
+                modalErrorDiv.innerText = "Sync Failed: " + syncResult.message;
+                modalErrorDiv.style.display = 'block';
+                modalBtn.innerText = 'Verify & Sync';
+                modalBtn.disabled = false;
+            }
+        } catch (err) {
+            console.error(err);
+            modalErrorDiv.innerText = "Error: Failed to process sheets. Verify uploader format.";
+            modalErrorDiv.style.display = 'block';
+            modalBtn.innerText = 'Verify & Sync';
+            modalBtn.disabled = false;
+        }
+    };
+    reader.readAsArrayBuffer(file);
 }
